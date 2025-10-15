@@ -1,0 +1,327 @@
+---
+title: "1-Preprocessing"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+local({
+  hook_output <- knitr::knit_hooks$get('output')
+  knitr::knit_hooks$set(output = function(x, options) {
+    if (!is.null(options$max.height)) options$attr.output <- c(
+      options$attr.output,
+      sprintf('style="max-height: %s;"', options$max.height)
+    )
+    hook_output(x, options)
+  })
+})
+
+```
+
+Preprocessing has many functions but overarching goals include reducing nuisance variation, increasing variation of interest (signal) and enabling comparison between samples. The choices made during preprocessing can significantly impact the results of downstream analyses. Important steps include loading data, including peak picking, region of interest (ROI) segmentation, and normalization.
+
+# Load Data
+
+# Peak picking
+
+# ROI Segmentation
+
+## Load required packages
+
+```{r library, results='hide', warning=FALSE, message=FALSE}
+library(tidyverse)
+library(Cardinal)
+source("Utilities.R")
+```
+
+## Find peak-picked imzML files
+
+```{r find_imzML}
+DATA_PATH <- file.path("Data/Peakpicked")
+MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
+                            recursive = TRUE)
+```
+
+## Load peak-picked imzML files
+
+We will keep them in a named list for now. Two images have areas of zero intensity, so they are trimmed. As these images are of tibial plateaus, we will flip some images so that the cartilage is always on top.
+
+```{r load_imzML}
+mse_list_pp = list()
+for (f in MSE_FILENAMES) {
+  just_fname <- isolate_filename(f)
+  agnostic_step_fname <- sub("^(\\d+)[ab](-[^-]*-[^-]*)-.*$", "\\1\\2", just_fname)
+  m <- readMSIData(file.path(DATA_PATH, f),verbose=F) 
+  
+  if (agnostic_step_fname == "6919-CAD-medial") {
+    m <- Cardinal::subset(m, mz > 0, x <= 390)
+  }
+  if (agnostic_step_fname == "6924-CAD-medial") {
+    m <- Cardinal::subset(m, mz > 0, x <= 367)
+  }
+  
+  if (agnostic_step_fname %in% c("6891-OA-lateral",
+                        "6891-OA-medial",
+                        "6949-OA-lateral",
+                        "6949-OA-medial",
+                        "6954-OA-lateral",
+                        "6954-OA-medial")) {
+    m <- flip_vertically(m)
+  }
+  runNames(m) <- agnostic_step_fname
+  mse_list_pp[[agnostic_step_fname]] <- m
+}
+```
+
+## Segmentation of ROIs
+
+ROIs define the tissue areas relevant to the biological question to be analyzed in later steps. Below we present a method that uses predefined marker ions to segment regions of interest. We will use this method to segment cartilage, bone, and background/extracellular matrix (ECM). It is important involve subject matter experts (i.e., pathologists, biologists who know the tissue) in selection of ROI markers and review of segmentation results. Unsupervised multivariate segmentation methods that use all features, although useful for discovery, should not be used to create ROIs when investigating differential abundance as doing go constitutes double dipping and overfits ROIs to biological variation.
+
+### Visualize segmentation markers
+
+```{r roi_setup}
+cartilage_feature_ids <- 37
+background_feature_ids <- c(286,287,288,299,300,301,308)
+m <- summarizeFeatures(flip_vertically(readMSIData(file.path(DATA_PATH, MSE_FILENAMES[9]),
+                                                   verbose=F)), 
+                       na.rm = T, 
+                       verbose = F)
+```
+
+We chose m/z `r mz(m)[cartilage_feature_ids]` as the cartilage marker, as it accurately defines cartilage across the greatest number of tissues. Below is a single tissue.
+
+```{r roi_vis_cartilage}
+image(m, i = cartilage_feature_ids, key = F)
+```
+
+There were seven m/z values indicative of background/ECM m/z: `r mz(m)[background_feature_ids]`
+
+-   M/z `r mz(m)[background_feature_ids[1:3]]` are Glufib and +1, +2, and +3 isotopes/H adducts.
+
+-   M/z `r mz(m)[background_feature_ids[4:6]]` are *potentially* Glufib +23 sodium adducts and +1 and +2 isotopes/H adducts.
+
+-   M/z `r mz(m)[background_feature_ids[7]]` is not a highly consistent spatial analog, similar enough to include in ROI segmentation.
+
+```{r roi_vis_background}
+image(m, i = background_feature_ids,
+      scale = T,
+     key = F)
+```
+
+### Segmenting cartilage
+
+To begin we will select only the single cartilage marker as its own MSE.
+
+```{r subset_cartilage_features}
+cartilage_features <- subsetFeatures(m,
+                                     mz %in% mz(m)[cartilage_feature_ids])
+```
+
+Spatial-Dirichlet Gaussian mixture models (sDGMM) [(Guo et al. 2019)](https://doi.org/10.1093/bioinformatics/btz345) is an open-source, unsupervised clustering algorithm that groups pixels in single ion images into $k$ prespecified clusters using pixel intensity and spatial dependence of neighboring pixels. sDGMM is technically unsupervised but acts only on single features, facilitating a higher degree of control and replicability. We will use adaptive weights to better define segment edges.
+
+Choosing the number of clusters is one way to affect a finer level of control over what sDGMM segments. In our testing we found six clusters, ordered by mean intensity with the first three assigned as cartilage, to yield the most consistent results across samples.
+
+```{r segment_cartilage_features}
+sdgmm <- spatialDGMM(cartilage_features, 
+                       k = 6, 
+                       r = 2,
+                       weights = "adaptive",
+                       verbose = F)
+
+cartilage_vector <- case_match(as.character(sdgmm$class[[1]]), 
+                               "6" ~ "other",
+                               "5" ~ "other", 
+                               "4" ~ "other",
+                               "3" ~ "cartilage", 
+                               "2" ~ "cartilage", 
+                               "1" ~ "cartilage")
+
+pData(cartilage_features)$class <- cartilage_vector
+```
+
+Visualizing the six clusters, we can see that in this case segmenting more clusters gave finer control over cartilage boundaries.
+
+```{r vis_cartilage_sdgmm}
+image(sdgmm)
+```
+
+After collapsing the six segments into only two.
+
+```{r vis_cartilage_class}
+image(cartilage_features, "class")
+```
+
+### Segmenting background and bone
+
+Background/ECM and bone tissues are mutually exclusive from cartilage, so we will perform segmentation only on sample areas classified in the steps above as not cartilage. This offers another advantage: our markers to differentiate bone and background/ECM do not have to also differentiate cartilage.
+
+First we will select only the background/ECM features and pixels not classified as cartilage.
+
+```{r subset_background_features}
+background_and_bone_features <- Cardinal::subset(m,
+                                                 mz %in% mz(m)[background_feature_ids],
+                                                 cartilage_vector=="other")
+```
+
+Unlike cartilage, we have selected six features for background/ECM segmentation. Instead of segmentation each individually, we will first combine them into a single feature by using the pixel-wise mean. `condense_groups` (supplied from `Utilities.R`) uses the `group_ids` assigned by `grouping_df` to combine features into groups. The `agg_fun="mean"` specifies we want to combine groups via the pixel-wise mean.
+
+```{r combine_background_features}
+grouping_df <- tibble(feature_id = 1:length(mz(background_and_bone_features)),
+                      group_id = rep(1, length(mz(background_and_bone_features))),
+                      mz = mz(background_and_bone_features))
+
+background_and_bone_features_condensed <- condense_groups(background_and_bone_features, 
+                                                          grouping_df, 
+                                                          verbose = FALSE, 
+                                                          agg_fun="mean", 
+                                                          na.rm=T)
+```
+
+Aggregating these features into a single feature by the pixel-wise mean concentrates signal and smooths out noise. Feature aggregation for ROI selection also presents some interesting possibilities - such as segmenting the pixel-wise ratio of two features.
+
+```{r vis_grouped_background_feature}
+image(background_and_bone_features_condensed, key = F)
+```
+
+Next we will segment the background/ECM feature aggregate using sDGMM. Like before, varying the number of clusters affects the segmentation results, especially at the segment boundaries.
+
+```{r segment_background}
+sdgmm <- spatialDGMM(background_and_bone_features_condensed, 
+                     k = 4, 
+                     r = 1,
+                     weights = "adaptive",
+                     verbose = F)
+
+bone_background_vector <- case_match(as.character(sdgmm$class[[1]]), 
+                                     "4" ~ "bone",
+                                     "3" ~ "background", 
+                                     "2" ~ "background", 
+                                     "1" ~ "background")
+pData(background_and_bone_features)$class <- bone_background_vector
+```
+
+Visualizing the four clusters before collapsing.
+
+```{r}
+image(sdgmm)
+```
+
+After collapsing into two classes, background and bone.
+
+```{r}
+image(background_and_bone_features, "class")
+```
+
+There are likely more underlying structures, especially in the bone ROI, that could be sub-segmented further. For the purpose of this demonstration we will conclude here, with three ROIs. The following combines ROI labels hierarchically.
+
+```{r combine_labels}
+factor_tibble <- tibble(x = pData(cartilage_features)$x,
+                        y = pData(cartilage_features)$y,
+                        cartilage = cartilage_vector) %>% 
+  left_join(tibble(x = pData(background_and_bone_features)$x,
+                   y = pData(background_and_bone_features)$y,
+                   bone_background = bone_background_vector), 
+            by = c("x","y")) %>%
+  mutate(zone = as.factor(ifelse(is.na(bone_background),
+                                 "cartilage", 
+                                 bone_background)))
+
+pData(m)$tissue_zone <- factor_tibble$zone
+```
+
+After segmentation and label combination we can visualize the final result for this sample.
+
+```{r vis_all_roi_classes}
+image(m, "tissue_zone")
+```
+
+## Segment all samples
+
+Now we will repeat this procedure on all samples, saving the ROI labels in a names list and a dataframe for visualization.
+
+```{r segment_all_tissues}
+hc_class_plotting_frame = NULL
+roi_list = list()
+i <- 1
+for (m in names(mse_list_pp)) {
+  print(paste0("Segmenting sample ", i))
+  i <- i+1
+  cartilage_features <- subsetFeatures(mse_list_pp[[m]], 
+                                       mz %in% fData(mse_list_pp[[m]])[cartilage_feature_ids,])
+  
+  sdgmm <- spatialDGMM(cartilage_features, 
+                       k = 6, 
+                       r = 2,
+                       weights = "adaptive",
+                       verbose = F)
+  
+  cartilage_vector <- case_match(as.character(sdgmm$class[[1]]), 
+                                 "6" ~ "other",
+                                 "5" ~ "other", 
+                                 "4" ~ "other",
+                                 "3" ~ "cartilage", 
+                                 "2" ~ "cartilage", 
+                                 "1" ~ "cartilage")
+  
+  background_and_bone_features <- Cardinal::subset(mse_list_pp[[m]], 
+                                                   mz %in% fData(mse_list_pp[[m]])[background_feature_ids,],
+                                                   cartilage_vector=="other")
+  grouping_df <- tibble(feature_id = 1:length(mz(background_and_bone_features)),
+                        group_id = rep(1, length(mz(background_and_bone_features))),
+                        mz = mz(background_and_bone_features))
+  background_and_bone_features_condensed <- condense_groups(background_and_bone_features, 
+                                                            grouping_df, 
+                                                            verbose = FALSE, 
+                                                            agg_fun="mean", 
+                                                            na.rm=T)
+  sdgmm <- spatialDGMM(background_and_bone_features_condensed, 
+                       k = 4, 
+                       r = 1,
+                       weights = "adaptive",
+                       verbose = F)
+  bone_background_vector <- case_match(as.character(sdgmm$class[[1]]), 
+                                       "4" ~ "bone",
+                                       "3" ~ "background", 
+                                       "2" ~ "background", 
+                                       "1" ~ "background")
+  factor_tibble <- tibble(x = pData(cartilage_features)$x,
+                          y = pData(cartilage_features)$y,
+                          cartilage = cartilage_vector) %>% 
+    left_join(tibble(x = pData(background_and_bone_features)$x,
+                     y = pData(background_and_bone_features)$y,
+                     bone_background = bone_background_vector), 
+              by = c("x","y")) %>%
+    mutate(zone = as.factor(ifelse(is.na(bone_background),
+                                   "cartilage", 
+                                   bone_background)))
+  pData(mse_list_pp[[m]])$tissue_zone <- factor_tibble$zone
+  roi_list[[m]] <- factor_tibble$zone
+  hc_class_plotting_frame <- bind_rows(hc_class_plotting_frame,
+                                       as_tibble(pData(mse_list_pp[[m]])) %>%
+                                         mutate(id = m))
+}
+
+save(roi_list, file = "Outputs/roi_list.Rdata")
+```
+
+Visualization of all samples' ROIs.
+
+```{r vis_class_all_samples, fig.asp=2, fig.width=3.5}
+ggplot(hc_class_plotting_frame %>% 
+         left_join(name_tibble, by = join_by(run)) %>%
+         mutate(roi = case_match(tissue_zone, 
+                                 "bone" ~ "Bone",
+                                 "background" ~ "Background",
+                                 "cartilage" ~ "Cartilage")), 
+       aes(x = x, y = -1*y, fill = roi)) + 
+  geom_tile() +
+  theme_void() +
+  facet_wrap("tid", scales = "free", ncol = 2) +
+  scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none") +
+  labs(fill = "ROI")
+```
+
+# Normalization

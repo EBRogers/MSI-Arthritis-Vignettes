@@ -1,0 +1,353 @@
+---
+title: "3-Statistical-Modeling"
+author: "Ethan Rogers"
+date: "2025-07-31"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+local({
+  hook_output <- knitr::knit_hooks$get('output')
+  knitr::knit_hooks$set(output = function(x, options) {
+    if (!is.null(options$max.height)) options$attr.output <- c(
+      options$attr.output,
+      sprintf('style="max-height: %s;"', options$max.height)
+    )
+    hook_output(x, options)
+  })
+})
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Statistical modeling formalizes the assumed relationships of our data mathematically and lets us estimate parameters like variances and means that we can use later for statistical inference. We will use linear mixed effects models as they are the simplest model that can specify the relationships and sources of variation in our experimental design. Once fit, we will assess the models for violations of assumptions. Once we have verified our models fit our data well, we can use them for statistical inference, which we will do in the next vignette, `4-Statistical-Inference`.
+
+## Load required packages
+
+```{r library, results='hide', warning=FALSE, message=FALSE}
+library(tidyverse)
+#library(Cardinal)
+library(devtools)
+load_all("~/OtherProjects/Cardinal")
+library(lmerTest)
+library(emmeans)
+source("Utilities.R")
+```
+
+## Find peak-picked, normalized, aggregated imzML files
+
+```{r find_imzML}
+DATA_PATH <- file.path("Data/Peakpicked-Normalized-Aggregated")
+MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
+                            recursive = TRUE)
+```
+
+## Load peak-picked imzML files
+
+As before we will keep individual samples in a named list for now. Two MSIs have areas of zero intensity, so they are trimmed. As these images are images of tibial plateaus, we will flip some images so that the cartilage is always on top. We will also assign the regions of interest using the saved names list from `Outputs`
+
+```{r load_imzML}
+mse_list_pp_normalized_reduced = list()
+for (f in MSE_FILENAMES) {
+  just_fname <- isolate_filename(f)
+  agnostic_step_fname <- sub("^(\\d+(?:[ab])?-[^-]*-[^-]*)\\..*$", "\\1", just_fname)
+  m <- readMSIData(file.path(DATA_PATH, f),verbose=F) 
+  
+  if (agnostic_step_fname == "6919-CAD-medial") {
+    m <- Cardinal::subset(m, mz > 0, x <= 390)
+  }
+  if (agnostic_step_fname == "6924-CAD-medial") {
+    m <- Cardinal::subset(m, mz > 0, x <= 367)
+  }
+  
+  if (agnostic_step_fname %in% c("6891-OA-lateral",
+                        "6891-OA-medial",
+                        "6949-OA-lateral",
+                        "6949-OA-medial",
+                        "6954-OA-lateral",
+                        "6954-OA-medial")) {
+    m <- flip_vertically(m)
+  }
+  runNames(m) <- agnostic_step_fname
+  mse_list_pp_normalized_reduced[[agnostic_step_fname]] <- m
+  rm(m)
+}
+```
+
+# Specify Statistical Models
+
+Models are specified based on the experimental design. In our case, we have two fixed effects: condition (Osteoarthritis vs Control) and tissue (Medial vs Lateral), and one random effect: subject. We will also include the interaction between condition and tissue. Modeling can be done in and out of Cardinal. We will demonstrate two methods: using `Cardinal::meansTest` and using `lmer` directly.
+
+## Method 1: Modeling in Cardinal
+
+Cardinal offers statistical modeling via `meansTest`. Under the hood, `meansTest` uses `lme4::lmer` to fit models with random effects and `stats::lm` for models without. `meansTest` requires a few steps to prepare the dataset for modeling. First, all MSEs need to be concatenated into a single image object with separate samples having unique runNames.
+
+```{r}
+# Combine MSIs into a single image
+all_mse <- mse_list_pp_normalized_reduced[[1]]
+
+for (i in 2:16) {
+  all_mse <- cbind(all_mse, mse_list_pp_normalized_reduced[[i]])
+}
+```
+
+To confine statistical testing to the region of interest, we will subset the pixels to only those in the cartilage. This is the longest step and may take a couple minutes.
+
+```{r}
+# Select pixels in ROI [longest step ~2min]
+all_mse <- subsetPixels(all_mse, tissue_zone == "cartilage")
+```
+
+Now we must add experimental variables to the `pData` of the MSE object. We will use the tibble from the utilities script. Essentially, independent variables (subject, tissue, and condition) must be specified for every pixel from every run (aka sample).
+
+```{r}
+# Convert to factors
+nt <- name_tibble %>% 
+  mutate(across(c(subject, condition, tissue), as.factor)) 
+
+# Use dplyr join to add to pData, preserving the order of pData pixels - not true when using merge.
+# Run is the key that links pData to the tibble
+pd <- left_join(as_tibble(pData(all_mse)) %>% 
+                  mutate(run = as.character(run)),
+                nt, 
+                by = "run")
+
+# Convert to factors in pData
+pData(all_mse)$subject <- pd$subject
+pData(all_mse)$condition <- pd$condition
+pData(all_mse)$tissue <- pd$tissue
+```
+
+We are ready to fit the models. The fixed effects are specified in the second argument. `condition * tissue` is shorthand for `condition + tissue + condition:tissue`, which includes the main effects and their interaction. The random effects are specified in the third argument. `~ 1|subject` indicates that we want a random intercept for each subject. Specification of random effects for `lmer` can be found [here](https://cran.r-project.org/web/packages/lme4/vignettes/lmer.pdf). For compatability with previous versions of Cardinal and `nlme::lme()`, the fixed and random effects are separated. The `samples` argument specifies which the variable that delineates which pixels are included in each sample or experimental unit.
+
+For mixed effects model, we can run meansTest using the default implementation, `nlme::lme()`, or specify `lme4::lmer()` using `use_lmer=TRUE` for newer Cardinal releases. When modeling basic random effects structures, both implementations are equivalent. `lme4::lmer()` extended via `lmerTest` enables use fo the satterhwaite approximation for caluclating degrees of freedom.
+
+### Modeling with `nlme::lme()` in Cardinal
+
+```{r}
+nlme_means_test <- meansTest(all_mse, ~ condition * tissue, ~ 1|subject, samples = run(all_mse))
+nlme_means_test
+```
+
+Note the P-value column. This is a P value for a [likelihood-ratio test](https://en.wikipedia.org/wiki/Likelihood-ratio_test) (LRT), investigating the goodness of fit by comparing our model to a reduced model. When no reduced model is given and random effects are specified, the reduced model defaults to a model with just the random effects. The P value indicates whether the full model is significantly better at explaining the variation than the reduced model. In this context the LRT is generally more of a diagnostic test of model fit. When specified correctly LRTs can offer a measure of the variance-explaining capacity of a specific term in the model, but does not offer information on the relevance to the outcome of interest. To get that information, we must run contrasts, as we will do in the next vignette, `4-Statistical-Inference`.
+
+### Modeling with `lme4::lmer()` in Cardinal
+
+```{r, max.height='150px'}
+lmer_means_test <- meansTest(all_mse, ~ condition * tissue, ~ 1|subject, samples = run(all_mse), use_lmer = TRUE)
+lmer_means_test
+```
+
+Note the `singular` column - Cardinal automatically reports singularity for `lme4::lmer()` models. Models can be singular for many reasons, in our case, this is likely due to low biological variance relative to technical variance. More on this later. If we print the results, we can see information about the models. In Cardinal, models fit with `lme4::lmer()` (via `use_lmer=TRUE`) use restricted maximum likihood estimation. meansTesting with `nlme::lme()`in Cardinal elects to use maximum liklihood estiamation to be comaptible with likelihood-ratio tests.
+
+Note: `meansTest` does not support likelihood-ratio tests for `lme4::lmer()` models. 
+
+Let's save the combined image and `lme4::lmer()` results for later.
+
+```{r}
+dir.create(file.path("Data","Combined-for-Modeling"), showWarnings=FALSE)
+writeMSIData(
+      all_mse, 
+      file.path("Data","Combined-for-Modeling", "all_mse.imzML"),
+      verbose = F
+    )
+
+save(lmer_means_test, file = "Outputs/meansTest_cartilage_lmer.RData" )
+```
+
+
+## Method 2: Modeling externally with `lmer`
+
+ALternativly, we can extract the data from the MSE objects and run the models ourselves. This allows for greater flexibility than using `Cardinal::meansTest`.
+
+First, let us create a helper function to run the models and extract the results tidily. In addition, we will calculate the intraclass correlation coefficient (ICC) for each model - a measure the breakdown between residual and within-subject variance, with greater values (\>0.5) indicating more within-subject variance than residual variance. We will also extract whether the model is singular and the convergence code. Our function will return three objects: a list of models, a wide tibble of model results, and a long tibble of model results that is better suited for plotting.
+
+```{r}
+# Helper function to model and catch errors
+library(broom.mixed)
+model_and_extract <- function(mse_frame, form) {
+  models <- list()
+  for (f in unique(mse_frame$feature_id)) {
+    data <- mse_frame %>% filter(feature_id == f)
+    print(paste0("Running model for: ", f))
+    models[[as.character(f)]] <- lmer(form, data = data)
+  }
+  model_results <- bind_rows(lapply(models, FUN = function(m){
+    tidy(m, "fixed") %>% mutate(model_id = "means",
+                                isSingular = isSingular(m),
+                                convergenceCode = get_convergence_code(m),
+                                icc = as.data.frame(VarCorr(m))$vcov[1]/sum(as.data.frame(VarCorr(m))$vcov),
+                                total_var = sum(as.data.frame(VarCorr(m))$vcov))  %>% 
+      pivot_wider(id_cols = c(isSingular, convergenceCode, icc, total_var),
+                  names_from = term,
+                  values_from = c(estimate, std.error, statistic, df, p.value))
+  }), .id = "feature_id")
+  # good for plotting
+  model_results_long <- model_results %>%
+    pivot_longer(
+      cols = starts_with("estimate_") | starts_with("std.error_") | starts_with("statistic_") | starts_with("df_") | starts_with("p.value_"),
+      names_to = c("model_item", "parameter"),
+      names_pattern = "(.*)_(.*)",
+      values_to = "value")
+  return(list(models = models, 
+              model_results = model_results, 
+              model_results_long = model_results_long))
+}
+```
+
+Now lets summarize the pixel means per sample by region of interest (ROI).
+
+```{r}
+# Summarize pixel means per sample by ROI
+mse_list_pp_normalized_reduced_summarized <- lapply(mse_list_pp_normalized_reduced, FUN = function(m) {
+  summarizeFeatures(m, 
+                    stat = c("mean"), 
+                    groups = m$tissue_zone, 
+                    na.rm = TRUE, 
+                    verbose = F)
+})
+```
+
+Next, we will extract the feature data from the MSE objects (roughly, a dataframe of each samples' mean feature intensity by ROI) and add the experimental variables to create a modeling dataframe. It is important to ensure that the sample IDs in the dataframe match those in the MSE objects, and that the experimental variables are factors. The models will still run if the variables are numeric, but it will treat them as continuous variables rather than categorical variables, which have different interpretations.
+
+```{r}
+# Extract means for modeling and specify experimental vars
+mse_frame <- bind_rows(lapply(mse_list_pp_normalized_reduced_summarized, FUN = function(m) {
+  as_tibble(fData(m)) %>% 
+    mutate(run = runNames(m),
+           feature_id = row_number())
+  }), .id = "sample_id") %>%
+  left_join(name_tibble, by = join_by(run)) %>%
+  mutate_at(vars(sample_id, feature_id, subject, condition, tissue), factor) |> 
+  arrange(feature_id, condition, tissue, subject) |> 
+  select(!c(sample_id, bone.mean, background.mean, tid:TISSUE))
+```
+
+```{r, echo=FALSE}
+rmarkdown::paged_table(head(mse_frame))
+```
+
+Now we can run the models, using the same formula as before. `Cardinal::meansTest` separates fixed and random effects as separate arguments. `lme4::lmer` combines them. We will also save the models and results. We can access a wide table of results with `cartilage_res[[2]]` and a list of models with `cartilage_res[[1]]`.
+
+
+```{r, max.height='150px'}
+# Model features
+cartilage_res <- model_and_extract(mse_frame, "cartilage.mean ~ condition * tissue + (1|subject)")
+```
+```{r}
+save(cartilage_res, file = "Outputs/cartilage_lmer_results.RData")
+rmarkdown::paged_table(head(cartilage_res[[2]]))
+```
+
+As above, many of the model are singular. Lets explore the ICC values of these models.
+
+```{r}
+knitr::kable(cartilage_res[[2]] |> 
+  summarize(`Percent ICC is at or near zero` = sum(icc <= 0.0001)/n()*100, .by = isSingular))
+```
+
+As we can see, most of the singular models have ICC values near zero (less than 0.0001), indicating that the models are not able to (meaningfully) partition out within-subject variance from residual variance. Aside from the theoretical issues implied by singularity (overly complex random effects structure, low biological variance relative to technical variance, etc.), singularity also interferes with calculation of degrees of freedom via the [Satterthwaite approximation](https://doi.org/10.2307/3002019). This method uses mean squares in the approximation, and when the model is singular, the mean squares for the random effect will be zero. `lmer` is aware of this problem and simply omits the random effect if singularity is detected, making it equivalent to a fixed effects model. Because we have the simplest random effects structure already, this solution is acceptable. However, for more complex random effects structures, one would instead iteratively remove random effect components until the model is no longer singular.
+
+# Evaluating Model Assumptions
+
+Linear mixed effects models make several assumptions that must be checked to ensure statistical validity. There are many ways to express these assumptions but in general they are that random effects and residuals independent, are normally distributed, and have constant variance. We can assess these assumptions with residual quantile-quantile (QQ) plots. As there are hundreds of models, we will randomly sample 20 to plot.
+
+```{r}
+qq_frame_cartilage <- NULL
+set.seed(2025)
+for (fid in sample(names(cartilage_res[[1]]), 20)) {
+  model <- cartilage_res[[1]][[fid]]
+  qq_frame_cartilage <- bind_rows(qq_frame_cartilage,
+                        tibble(residuals = residuals(model),
+                               fitted = fitted(model),
+                               feature_id = fid))
+}
+
+qq_frame_cartilage |> 
+  mutate(feature_id = as.numeric(feature_id)) |> 
+  left_join(tibble(mz = mz(mse_list_pp_normalized_reduced[[1]])) |> 
+            mutate(feature_id = row_number(),
+                  mz = round(mz,3)), 
+         by = join_by(feature_id)) |> 
+  ggplot(aes(sample = residuals)) +
+  stat_qq() +
+  stat_qq_line(distribution = stats::qnorm) +
+  facet_wrap(~mz, nrow = 4, scales = "free") +
+  labs(title = "QQ Plots of Residuals", x = "Theoretical (Normal) Quantiles", y = "Residual Quantiles")
+```
+
+In general, aside from maybe plot 1406.672, the residuals appear to be normally distributed - the points fall roughly along the reference line. This indicates that the residuals are generally normally distributed. Ideally, we would also verify normality of the random effect distributions using `hist(ranef(model)$subject[[1]])`, but with only 8 subjects, this is not very informative.
+
+
+```{r}
+library(ggpubr)
+set.seed(2025)
+
+n <- 16
+
+normal <- rnorm(n, mean = 0, sd = 1)
+exp_dist <- rchisq(n, df = .5)
+normal_with_outlier <- c(rnorm(n - 1, mean = 0, sd = 1), 5)
+
+qq_data <- function(x) {
+  qq <- qqnorm(x, plot.it = FALSE)
+  data.frame(
+    sample = qq$y,
+    theoretical = qq$x
+  )
+}
+
+df <- bind_rows(
+  qq_data(normal) %>% mutate(scenario = "Example of acceptable fit: Normal"),
+  qq_data(exp_dist) %>% mutate(scenario = "Example of poor fit: Right-skewed"),
+  qq_data(log2(exp_dist)) %>% mutate(scenario = "Example of acceptable fit: Right-skewed\nafter log transformation")
+) |> 
+  mutate(scenario = factor(scenario, levels = c("Example of acceptable fit: Normal",
+                                      "Example of poor fit: Right-skewed",
+                                      "Example of acceptable fit: Right-skewed\nafter log transformation")))
+
+ggplot(df, aes(sample = sample)) +
+  stat_qq() +
+  stat_qq_line(distribution = stats::qnorm) +
+  facet_wrap(~ scenario, scales = "free") +
+  labs(x = "Theoretical (Normal) Quantiles",
+       y = "Residual Quantiles")
+ggsave("Outputs/figure_qq_examples.png", width = 8, height = 4)
+
+#---------------------------
+
+set.seed(2025)
+
+df <- NULL
+
+n = 8
+
+for (s in 1:8) {
+    df <- bind_rows(df,
+                    tibble(sample = rnorm(n, mean = 0, sd = 1)) |> 
+                      mutate(subject = s,
+                      condition = ifelse(s <= 4, "Control", "OA")))
+}
+
+
+library(ggpubr)
+
+ggarrange(
+ggplot(df, aes(x = sample, y = condition)) +
+  geom_boxplot(alpha = 0.5, outliers = F) +
+  geom_jitter(width = 0.01, alpha = 0.2) +
+  labs(x = "Residuals",
+       y = "Condition") +
+  xlim(-3,3),
+ggplot(df, aes(y = sample, x = as.factor(subject))) +
+  geom_boxplot(alpha = 0.5, outliers = F) +
+  geom_jitter(width = 0.1, alpha = 0.2) +
+  labs(x = "Subject",
+       y = "Residuals")+
+  ylim(-3,3),
+nrow = 2, labels = c("A", "B"))
+ggsave("Outputs/figure_constant_variance.png", width = 8, height = 6)
+
+
+
+
+```

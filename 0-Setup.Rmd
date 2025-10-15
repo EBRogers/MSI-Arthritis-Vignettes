@@ -1,0 +1,24 @@
+---
+title: "0-Setup"
+author: "Ethan Rogers"
+date: "2025-07-17"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Dependencies
+
+This workflow requires the following packages and their dependencies:
+- Cardinal 3.6*
+- Tidyverse
+- data.table
+- fuzzyjoin (for feature dimensi)
+
+
+```{r cars}
+
+```
+

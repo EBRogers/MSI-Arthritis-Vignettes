@@ -1,0 +1,340 @@
+---
+title: "Re-calibration and preprocessing of 6919 CAD dataset"
+author: "Sai Srikanth Lakkimsetty"
+date: "Sep, 2023"
+output:
+    BiocStyle::html_document:
+    toc: true 
+vignette: >
+  %\VignetteIndexEntry{Co-registration}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, echo=FALSE, message=FALSE}
+# A flag to manage chunk re-runs while knitting ... 
+# Set SHARING to FALSE if you are re-knitting the code and variables are already 
+# in the environment. Manage individual code chunk evaluation with "eval" option. 
+
+SHARING <- FALSE 
+
+library("Cardinal")
+RNGkind("L'Ecuyer-CMRG") 
+
+setCardinalBPPARAM(MulticoreParam(progressbar=TRUE)) 
+setCardinalVerbose(TRUE)
+```
+
+```{r style, echo=FALSE, results='asis', eval=TRUE}
+BiocStyle::markdown()
+```
+
+
+# Introduction 
+
+Before we perform comparative or differential analyses of the tissues, we should calibrate the datasets first. This is because the datasets are acquired in separate runs despite being handled similarly and from the same institute. 
+
+The spectral processing leading to the calibration is performed in a similar way as described in Vignette 3 of the Cardinal3 paper ([vignette 3](https://github.com/Vitek-Lab/Cardinal3-vignettes/blob/main/Vignettes/Vignette3/case-study3-vignette.html), [Cardinal3 paper](https://www.biorxiv.org/content/10.1101/2023.02.20.529280v1)). An overview of the alignment, calibration and preprocessing steps are shown below. 
+
+```{r overview-fig, eval=TRUE, echo=FALSE, include=TRUE} 
+knitr::include_graphics("../inkscape-files/msi-processing.png")
+```
+
+
+The independent part of the processing is performed only once per MSI dataset. This includes smoothing, baseline reduction, m/z alignment and calibration against calibrant m/z. This is the most time consuming part of the workflow as the processing is performed on raw data (~20 hours per pair, estimated). 
+
+The dependent part of the processing is performed as many times as we want to do comparative analysis between tissues. This includes peak picking, filtering, aligning, binning and intensity normalization. For example, if we want to do an analysis between 6891a lateral slice against 6919a medial slice, this part is performed. If we want to do 6891a vs 6919b, we will have to do this part again. However, this part is not computationally heavy (15-20 mins per pair). 
+
+<!-- [!CHN] Change the dataset description. --> 
+In this vignette, we perform calibration between images 6891a and 6891b in the CAD condition. 
+
+```{r directories, eval=SHARING} 
+DATAPATH <- "~/Documents/9-data"
+CURRPATH <- "14-Buck-Institute/imzMLs"
+ENVSAVEPATH <- "~/Documents/1-saved-envs/vignettes"
+
+mse_lat_filename <- "6919b_cad_lat.imzML" 
+mse_med_filename <- "6919a_cad_med.imzML" 
+env_filename <- "14-1-6919-CAD.RData" 
+``` 
+
+
+```{r data-logistics, eval=SHARING} 
+saveImage <- function(filename) {
+    save.image(file.path(ENVSAVEPATH, filename))
+} 
+
+
+loadImage <- function(filename) {
+    load(file.path(ENVSAVEPATH, filename), envir=.GlobalEnv)
+} 
+``` 
+
+
+Read data into R. We perform the same operations on both datasets simultaneously so we can visualize intermediate results. 
+
+```{r data-load, eval=SHARING} 
+mse_lat <- readMSIData(file.path(DATAPATH, CURRPATH, 
+    mse_lat_filename)) 
+mse_med <- readMSIData(file.path(DATAPATH, CURRPATH, 
+    mse_med_filename)) 
+```
+
+
+# Spectral processing and mass alignment 
+
+First we perform spectra smoothing and baseline reduction. Although our datasets are of high mass resolution, this is recommended. CAUTION: These two operations are very computationally intensive, and R session may crash due to running out of memory. So we will be saving the results and the environment frequently. 
+
+```{r lat-smooth-bl-remove, eval=SHARING} 
+mse_lat_smoothed <- mse_lat |> 
+    smoothSignal(method="gaussian", window=8, sd=2) |> 
+    process() 
+
+mse_lat_smoothed_blremoved <- mse_lat_smoothed |> 
+    reduceBaseline(fun=median, blocks = 750) |> 
+    process() 
+```
+
+
+```{r lat-smooth-bl-remove-save, eval=FALSE, echo=FALSE, include=FALSE} 
+# writeMSIData(mse_lat_smoothed_blremoved, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919b-CAD-lateral-smoothed-blremoved.imzML"))
+```
+
+
+```{r med-smooth-bl-remove, eval=SHARING} 
+mse_med_smoothed <- mse_med |> 
+    smoothSignal(method="gaussian", window=8, sd=2) |> 
+    process() 
+
+mse_med_smoothed_blremoved <- mse_med_smoothed |> 
+    reduceBaseline(fun=median, blocks = 750) |> 
+    process() 
+```
+
+
+```{r med-smooth-bl-remove-save, eval=FALSE, echo=FALSE, include=FALSE} 
+# writeMSIData(mse_med_smoothed_blremoved, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919a-CAD-medial-smoothed-blremoved.imzML")) 
+```
+
+
+<!-- [!CHN] Resolution of the data and tolerance below. -->
+Next we perform m/z alignment in order to remove m/z shifts between spectra within the datasets. The datasets have mass resolution of 40ppm. So, we select 
+
+```{r mz-align-read, eval=FALSE, echo=FALSE, include=FALSE} 
+# mse_lat_smoothed_blremoved <- readMSIData(file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919b-CAD-lateral-smoothed-blremoved.imzML"))
+# 
+# mse_med_smoothed_blremoved <- readMSIData(file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919a-CAD-medial-smoothed-blremoved.imzML"))
+```
+
+
+```{r mz-align, eval=SHARING} 
+mse_lat_mzaligned <- mse_lat_smoothed_blremoved |> 
+    mzAlign(tolerance=80, units="ppm") |> 
+    process() 
+
+mse_med_mzaligned <- mse_med_smoothed_blremoved |> 
+    mzAlign(tolerance=80, units="ppm") |> 
+    process() 
+```
+
+
+```{r mz-align-save, eval=FALSE, echo=FALSE, include=FALSE} 
+# writeMSIData(mse_lat_mzaligned, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919b-CAD-lateral-mzaligned.imzML"))
+# writeMSIData(mse_med_mzaligned, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919a-CAD-medial-mzaligned.imzML"))
+```
+
+
+Here, we visualize the spectral alignment for randomly selected spectra before and after alignment. 
+
+```{r mz-align-plot, eval=TRUE, warning=FALSE, fig.show="hold"}  
+def.par <- par() 
+par(mfrow=c(2,1), xpd=FALSE) 
+plot(mse_lat_smoothed_blremoved, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Lateral slice before alignment", layout=c(2,1)) 
+
+par(xpd=FALSE) 
+plot(mse_lat_mzaligned, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Lateral slice after alignment", layout=NULL) 
+par(def.par)
+
+
+par(mfrow=c(2,1), xpd=FALSE) 
+plot(mse_med_smoothed_blremoved, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Medial slice before alignment", layout=c(2,1)) 
+
+par(xpd=FALSE) 
+plot(mse_med_mzaligned, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Medial slice after alignment", layout=NULL)
+par(def.par) 
+```
+
+
+# Re-calibration 
+
+## Re-calibration with multiple calibrants 
+
+The spiked calibrant to all the samples is glu-fib or fibrinopeptide and is at 1570.6896 m/z. We will also use 843.39; 1019.50; 1211.58?; 1552 ( glufib - water) 2097 for calibrating the spectra to these m/z. 
+
+```{r calibration-multiple-read, eval=FALSE, echo=FALSE, include=FALSE} 
+# mse_lat_mzaligned <- readMSIData(file.path(DATAPATH, CURRPATH,
+#     "processed-in-R/1-6919b-CAD-lateral-mzaligned.imzML"))
+# mse_med_mzaligned <- readMSIData(file.path(DATAPATH, CURRPATH,
+#     "processed-in-R/1-6919a-CAD-medial-mzaligned.imzML"))
+```
+
+
+```{r lat-med-calibration-multiple, eval=SHARING} 
+calibrant_mz <- c(1570.6896, 843.39, 1019.50, 1211.58, 1552, 2097)
+
+mse_lat_calibrated <- mse_lat_mzaligned |> 
+    mzAlign(ref=calibrant_mz, tolerance=80, units="ppm") |> 
+    process() 
+
+mse_med_calibrated <- mse_med_mzaligned |> 
+    mzAlign(ref=calibrant_mz, tolerance=80, units="ppm") |> 
+    process() 
+```
+
+
+```{r calibration-multiple-save, eval=FALSE, echo=FALSE, include=FALSE} 
+# writeMSIData(mse_lat_calibrated, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919b-CAD-lateral-calibrated.imzML"))
+# writeMSIData(mse_med_calibrated, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919a-CAD-medial-calibrated.imzML")) 
+
+# mse_lat_calibrated <- readMSIData(file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919b-CAD-lateral-calibrated.imzML"))
+# mse_med_calibrated <- readMSIData(file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919a-CAD-medial-calibrated.imzML"))
+```
+
+
+We now visualize spectra before and after re-calibration for both tissues. 
+
+```{r lat-calibration-viz, eval=TRUE, fig.show="hold"} 
+par(mfrow=c(2,1), xpd=FALSE)
+
+plot(mse_lat_mzaligned, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Lateral slice before calibration", layout=c(2,1)) 
+abline(v=1570.6896, col="red", lty=2) # glu-fib 
+
+par(xpd=FALSE) 
+plot(mse_lat_calibrated, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Lateral slice after calibration", layout=NULL) 
+abline(v=1570.6896, col="red", lty=2) # glu-fib 
+``` 
+
+
+```{r med-calibration-viz, eval=TRUE, fig.show="hold"} 
+par(mfrow=c(2,1), xpd=FALSE)
+
+plot(mse_med_mzaligned, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Medial section before calibration", layout=c(2,1)) 
+abline(v=1570.6896, col="red", lty=2) # glu-fib 
+
+par(xpd=FALSE) 
+plot(mse_med_calibrated, pixel=c(22, 219, 497, 725, 803, 1000), 
+     xlim=c(1568, 1572), ylim=c(0,1200), key=FALSE, superpose=TRUE, 
+     main="Medial section after calibration", layout=NULL) 
+abline(v=1570.6896, col="red", lty=2) # glu-fib 
+```
+
+
+# Peak processing 
+
+Now that the datasets are calibrated, we can peak pick the datasets. Since the medial section has more damage than the lateral one, we will perform peak picking, alignment and filtering on the medial section. 
+
+```{r peak-proc-read, eval=FALSE, echo=FALSE, include=FALSE} 
+# mse_lat_calibrated <- readMSIData(file.path(DATAPATH, CURRPATH,
+#     "processed-in-R/1-6919b-CAD-lateral-calibrated.imzML"))
+# mse_med_calibrated <- readMSIData(file.path(DATAPATH, CURRPATH,
+#     "processed-in-R/1-6919a-CAD-medial-calibrated.imzML"))
+```
+
+
+```{r med-peak-proc, eval=SHARING} 
+mse_med_pp <- mse_med_calibrated |> 
+    peakPick(method="simple", SNR=5, window=10, blocks=500) |> 
+    peakAlign(tolerance=80, units="ppm") |> 
+    peakFilter(freq.min=0.01) |> 
+    process() 
+```
+
+
+Then, we can use the peak list from medial section to extract m/z of the picked peaks and bin peaks from the re-calibrated spectra of both medial and lateral sections. 
+
+```{r bin-peaks, eval=SHARING} 
+peakpicked_mz <- mz(mse_med_pp) 
+
+mse_lat_pbinned <- mse_lat_calibrated |> 
+    peakBin(tolerance=80, units="ppm", ref=peakpicked_mz) |> 
+    process() 
+
+mse_med_pbinned <- mse_med_calibrated |> 
+    peakBin(tolerance=80, units="ppm", ref=peakpicked_mz) |> 
+    process() 
+```
+
+
+Lastly, we will perform intensity normalization of the total ion current (TIC). 
+
+```{r ints-norm, eval=SHARING} 
+mse_lat_normalized <- mse_lat_pbinned |> 
+    normalize(method="tic") |> 
+    process() 
+
+mse_med_normalized <- mse_med_pbinned |> 
+    normalize(method="tic") |> 
+    process() 
+```
+
+
+```{r peak-proc-save, eval=FALSE, echo=FALSE, include=FALSE} 
+# writeMSIData(mse_lat_normalized, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919b-CAD-lateral-proc.imzML"))
+# writeMSIData(mse_med_normalized, file.path(DATAPATH, CURRPATH,
+#         "processed-in-R/1-6919a-CAD-medial-proc.imzML")) 
+
+# Read normalized 
+# mse_lat_normalized <- readMSIData(file.path(DATAPATH, CURRPATH,
+#             "processed-in-R/1-6919b-CAD-lateral-proc.imzML"))
+# mse_med_normalized <- readMSIData(file.path(DATAPATH, CURRPATH,
+#             "processed-in-R/1-6919a-CAD-medial-proc.imzML"))
+```
+
+
+Finally, we will verify that both the medial and lateral sections have the same number of m/z features and that they are identical. 
+
+```{r mz-verification, eval=TRUE} 
+print(paste0("Lengths of m/z features are identical: ", 
+             identical(length(mz(mse_lat_normalized)), 
+                       length(mz(mse_med_normalized)))
+             )
+) 
+
+print(paste0("m/z features are identical: ", 
+             identical(mz(mse_lat_normalized), mz(mse_med_normalized))
+             )
+) 
+```
+
+
+# Session info 
+
+```{r session-info, eval=TRUE} 
+sessionInfo()
+```
+

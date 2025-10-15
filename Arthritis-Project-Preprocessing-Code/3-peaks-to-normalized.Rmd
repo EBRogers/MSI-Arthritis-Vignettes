@@ -1,0 +1,281 @@
+---
+title: "Arthritis project: exploding spectral intensities analysis"
+author: "Sai Srikanth Lakkimsetty"
+date: "May, 2025"
+output:
+    BiocStyle::html_document:
+    toc: true 
+vignette: >
+  %\VignetteIndexEntry{Clipped median normalization}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, echo=FALSE, message=FALSE}
+SHARING <- FALSE 
+ 
+library("Cardinal") 
+library("ggplot2") 
+library("tidyverse")
+RNGkind("L'Ecuyer-CMRG") 
+
+setCardinalBPPARAM(MulticoreParam(progressbar=TRUE)) 
+setCardinalVerbose(TRUE)
+```
+
+```{r style, echo=FALSE, results='asis', eval=TRUE}
+BiocStyle::markdown()
+```
+
+```{r directories, eval=SHARING}
+DATAPATH <- "/Users/lakkimsetty.s/Library/Mobile Documents" 
+CURRPATH <- "com~apple~CloudDocs/250326-recalibrated-images" 
+
+# DATAPATH <- "/Users/lakkimsetty.s/Library/Mobile Documents" 
+# CURRPATH <- "com~apple~CloudDocs/250415-peakpicked-images" 
+```
+
+```{r data-import, eval=SHARING} 
+source( 
+    file.path( 
+        "/Users/lakkimsetty.s/Library/Mobile Documents", 
+        "com~apple~CloudDocs/01-NU/phd/1-supplementary", 
+        "2-Buck-Institute-Arthritis-project", 
+        "5-normalization/0-resources", 
+        "normalization-setup-utils.R"
+    )
+)
+``` 
+
+```{r peakpicked-mz-import, eval=SHARING} 
+# Import mzs from 250415-peakpicked data 
+# mzs <- . 
+load(file.path("/Users/lakkimsetty.s/Library/Mobile Documents", 
+               "com~apple~CloudDocs/250415-peakpicked-images",
+               "250415-peakpicked-images-mzs.RData")) 
+```
+
+```{r peakpick-on-reference, eval=SHARING} 
+mses_repicked <- lapply(
+    mses_recalibrated, 
+    function(mse) {
+        mse <- peakPick(mse, ref=mzs, type="height", 
+                        tolerance=400, units="ppm") |> process(domain=mzs) 
+    }
+) 
+mses_repicked <- rename_runnames(mses_repicked, "repicked") 
+``` 
+
+```{r peakpicked-v-repicked} 
+# msec: (re)calibrated 
+# msep: (original) peakpicked 
+# msepx: peakpicked through peakprocess 
+# mseps: (doubly) peakpicked by subsetting 
+# msepd: (doubly) peakpicked by domain
+
+did <- 3 
+msec <- mses_recalibrated[[did]] 
+msep <- mses_peakpicked[[did]] 
+msepx <- MSImagingExperiment(
+    spectraData = intensity(msec) |> as.matrix(), 
+    featureData = featureData(msec), 
+    pixelData = pixelData(msec)
+    )  |> peakProcess(method="diff", SNR=5, 
+    sampleSize=0.3, filterFreq=0.05) 
+
+msepx2 <- MSImagingExperiment(
+    spectraData = intensity(msec) |> as.matrix(), 
+    featureData = featureData(msec), 
+    pixelData = pixelData(msec)
+    ) |> peakProcess(method="diff", ref=mzs, SNR=5, 
+    sampleSize=0.3, filterFreq=0.02) 
+
+mseps <- peakPick(msec, ref=mzs, type="height", 
+                 tolerance=700, units="ppm") |> process() 
+idx <- features(mseps, mz=mzs) 
+mseps <- mseps[idx, ] 
+
+msepd <- peakPick(msec, ref=mzs, type="height", 
+                 tolerance=700, units="ppm") |> process(domain=mzs) 
+
+pc <- msec |> plot(i=783, xlim=c(1500, 1600)) 
+pp <- msep |> plot(i=783, xlim=c(1500, 1600)) 
+ppx <- msepx |> plot(i=783, xlim=c(1500, 1600)) 
+ppx2 <- msepx2 |> plot(i=783, xlim=c(1500, 1600)) 
+pps <- mseps |> plot(i=783, xlim=c(1500, 1600)) 
+ppd <- msepd |> plot(i=783, xlim=c(1500, 1600)) 
+
+matter::as_facets(list(pc, pp, pps, ppd, ppx, ppx2), 
+    nrow=3, labels=c("calibrated", "orig pp", 
+        "subset pp", "domain pp", "process pp", "process pp2")) 
+``` 
+
+```{r remove-bg-features, eval=SHARING}
+mse <- mses_repicked[[1]] 
+bg_mz <- c(1570.684, 1571.687, 1572.688, 1592.678, 1593.679, 1594.675) 
+all_mz <- mz(mse) 
+
+bg_idx <- features(mse, mz=bg_mz) 
+all_idx <- c(1:length(all_mz)) 
+tokeep_idx <- setdiff(all_idx, bg_idx)
+
+mses_repicked <- lapply(mses_repicked, function(x) {
+    x[tokeep_idx, ] 
+}) 
+``` 
+
+```{r intensity-clipping, eval=SHARING} 
+mses_clipped <- lapply(
+    mses_repicked, 
+    clip_intensities
+) 
+mses_clipped <- rename_runnames(mses_clipped, "clipped") 
+
+mses_clipped <- lapply(
+    mses_clipped, 
+    function(x) {
+        pixelData(x)$median <- x |> 
+            medians_by_pixel() 
+        x 
+    }
+) 
+
+mses_clippedNA <- lapply(
+    mses_clipped, 
+    NAize_sparse_spectra
+)
+``` 
+
+```{r compute-median, eval=SHARING}
+medians <- sapply(mses_clipped, function(x) {
+    pixelData(x)$median |> median(na.rm=TRUE) 
+}) |> unname() 
+
+MEDIAN <- median(medians) 
+```
+
+```{r median-normalization, eval=SHARING} 
+mses_normalized <- lapply(
+    mses_clipped, 
+    normalize_with_median 
+) 
+mses_normalized <- rename_runnames(mses_normalized, "normalized") 
+
+mses_normalized <- lapply(
+    mses_normalized, 
+    function(mse) {
+        pixelData(mse)$median <- mse |> 
+            medians_by_pixel() 
+        mse 
+    }
+) 
+``` 
+
+```{r checks} 
+# Check if the ranges of intensities are within expected ranges. 
+maxints <- sapply( 
+    mses_normalizedNA, 
+    function(mse) {
+        r <- mse |> 
+            spectra() |> 
+            range(na.rm = TRUE) 
+        max(r)
+    }
+) |> 
+    unname() 
+
+ifelse(maxints > 10e+5, TRUE, FALSE) |> which() # print offenders 
+
+
+did <- 1 
+mse <- mses_normalized[[did]]
+.mse <- mse |> spectra() 
+
+bad_pixels <- logical(length(mse)) 
+
+for (i in c(1:length(mse))) {
+    mx <- max(.mse[, i], na.rm=TRUE) 
+    bad_pixels[i] <- ifelse(mx > 1e+5, TRUE, FALSE) 
+} 
+
+bad_pixels <- which(bad_pixels) 
+
+plts <- lapply( 
+    bad_pixels, 
+    \(i) {
+        plot(mse, i=i)
+    }
+)
+matter::as_facets(plts, nrow=3) 
+
+bp1 <- bad_pixels[1] 
+mseno |> plot(i=bp1, xlim=c(1500, 1600))
+
+mserc <- mses_recalibrated[[1]]
+msepp <- mses_peakpicked[[1]] 
+mserp <- mses_repicked[[1]] 
+msecl <- mses_clipped[[1]] 
+msecln <- mses_clippedNA[[1]]
+mseno <- mses_normalized[[1]] 
+msenon <- mses_normalizedNA[[1]]
+
+prc <- mserc |> plot(i=bp1, xlim=c(1500, 1600)) 
+ppp <- msepp |> plot(i=bp1, xlim=c(1500, 1600)) 
+prp <- mserp |> plot(i=bp1, xlim=c(1500, 1600)) 
+pcl <- msecl |> plot(i=bp1, xlim=c(1500, 1600)) 
+pcln <- msecln |> plot(i=bp1, xlim=c(1500, 1600)) 
+pno <- mseno |> plot(i=bp1, xlim=c(1500, 1600)) 
+pnon <- msenon |> plot(i=bp1, xlim=c(1500, 1600)) 
+
+plt <- matter::as_facets(
+    list(
+        "recalibrated" = prc, 
+        "peakpicked" = ppp, 
+        "repicked" = prp, 
+        "clipped" = pcl, 
+        "clippedNA" = pcln, 
+        "normalized" = pno, 
+        "normalizedNA" = pnon 
+    ), nrow=4, free="y"
+) 
+plt <- plt |> matter::set_channel("x", label="m/z") 
+plt <- plt |> matter::set_channel("y", label="Intensity") 
+plt |> plot() 
+
+msecl_bp1 <- spectra(msecl)[, bp1] 
+mseno_bp1 <- spectra(mseno)[, bp1] 
+bad_median <- msecl_bp1 |> median(na.rm=T) 
+scaling_factor <- MEDIAN / bad_median 
+
+msecl_bp1s <- msecl_bp1 * scaling_factor 
+all.equal(msecl_bp1s, mseno_bp1) 
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
