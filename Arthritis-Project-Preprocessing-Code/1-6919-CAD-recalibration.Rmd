@@ -15,6 +15,7 @@ vignette: >
 # A flag to manage chunk re-runs while knitting ... 
 # Set SHARING to FALSE if you are re-knitting the code and variables are already 
 # in the environment. Manage individual code chunk evaluation with "eval" option. 
+library("Cardinal")
 
 SHARING <- FALSE 
 
@@ -36,11 +37,6 @@ Before we perform comparative or differential analyses of the tissues, we should
 
 The spectral processing leading to the calibration is performed in a similar way as described in Vignette 3 of the Cardinal3 paper ([vignette 3](https://github.com/Vitek-Lab/Cardinal3-vignettes/blob/main/Vignettes/Vignette3/case-study3-vignette.html), [Cardinal3 paper](https://www.biorxiv.org/content/10.1101/2023.02.20.529280v1)). An overview of the alignment, calibration and preprocessing steps are shown below. 
 
-```{r overview-fig, eval=TRUE, echo=FALSE, include=TRUE} 
-knitr::include_graphics("../inkscape-files/msi-processing.png")
-```
-
-
 The independent part of the processing is performed only once per MSI dataset. This includes smoothing, baseline reduction, m/z alignment and calibration against calibrant m/z. This is the most time consuming part of the workflow as the processing is performed on raw data (~20 hours per pair, estimated). 
 
 The dependent part of the processing is performed as many times as we want to do comparative analysis between tissues. This includes peak picking, filtering, aligning, binning and intensity normalization. For example, if we want to do an analysis between 6891a lateral slice against 6919a medial slice, this part is performed. If we want to do 6891a vs 6919b, we will have to do this part again. However, this part is not computationally heavy (15-20 mins per pair). 
@@ -49,12 +45,12 @@ The dependent part of the processing is performed as many times as we want to do
 In this vignette, we perform calibration between images 6891a and 6891b in the CAD condition. 
 
 ```{r directories, eval=SHARING} 
-DATAPATH <- "~/Documents/9-data"
-CURRPATH <- "14-Buck-Institute/imzMLs"
-ENVSAVEPATH <- "~/Documents/1-saved-envs/vignettes"
+DATAPATH <- "./Data/Raw"
+#CURRPATH <- "14-Buck-Institute/imzMLs"
+ENVSAVEPATH <- "./Outputs"
 
-mse_lat_filename <- "6919b_cad_lat.imzML" 
-mse_med_filename <- "6919a_cad_med.imzML" 
+mse_lat_filename <- "6919b_lat_cad.imzML" 
+mse_med_filename <- "6919a_med_cad.imzML" 
 env_filename <- "14-1-6919-CAD.RData" 
 ``` 
 
@@ -74,10 +70,8 @@ loadImage <- function(filename) {
 Read data into R. We perform the same operations on both datasets simultaneously so we can visualize intermediate results. 
 
 ```{r data-load, eval=SHARING} 
-mse_lat <- readMSIData(file.path(DATAPATH, CURRPATH, 
-    mse_lat_filename)) 
-mse_med <- readMSIData(file.path(DATAPATH, CURRPATH, 
-    mse_med_filename)) 
+mse_lat <- readMSIData(file.path(DATAPATH, mse_lat_filename)) 
+mse_med <- readMSIData(file.path(DATAPATH, mse_med_filename)) 
 ```
 
 
@@ -87,7 +81,7 @@ First we perform spectra smoothing and baseline reduction. Although our datasets
 
 ```{r lat-smooth-bl-remove, eval=SHARING} 
 mse_lat_smoothed <- mse_lat |> 
-    smoothSignal(method="gaussian", window=8, sd=2) |> 
+    smooth(method="gaussian", window=8, sd=2) |> 
     process() 
 
 mse_lat_smoothed_blremoved <- mse_lat_smoothed |> 
