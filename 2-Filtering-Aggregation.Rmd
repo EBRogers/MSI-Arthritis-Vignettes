@@ -20,7 +20,7 @@ local({
 })
 ```
 
-Filtering and aggregation of peak-picked and normalized MSI data further concentrate signal and reduce noise. Additionally, these steps reduce the number of features, and therefore the number statistical comparisons. Fewer tests means less stringent multiple hypothesis correction, and greater experimental sensitivity. Unfortunately feature clustering is computationally intensive and may require access to high performance computing resources.
+Filtering and aggregation of peak-picked and normalized MSI data further concentrate signal and reduce noise. Additionally, these steps reduce the number of features, and therefore the number of statistical comparisons. Fewer tests mean less stringent multiple hypothesis correction and greater experimental sensitivity. Unfortunately, feature clustering is computationally intensive and may require access to high-performance computing resources.
 
 ## Load required packages and data
 
@@ -44,12 +44,12 @@ zero_to_na <- function(x, mz) {
 
 ```{r find_imzML}
 COMBINED_DATA_PATH <- file.path("Data","Preprocessing","normalized.imzML")
-load("Outputs/roi_list.RData")
+load("Outputs/roi_list.Rdata")
 ```
 
 ## Load peak-picked imzML files
 
-We will load the combined, normalized, peak-picked image. We will then replace zero's with NAs. ImzML format does not respect NA values, so Cardinal will read them as zeros when reloaded. We will also join the ROIs created in `1-Preprocessing`.
+We will load the combined, normalized, peak-picked image. We will then replace zeros with NAs. The imzML format does not respect NA values, so Cardinal will read them as zeros when reloaded. We will also join the ROIs created in `1-Preprocessing`.
 
 ```{r load_imzML}
 mse <- readMSIData(COMBINED_DATA_PATH, verbose = F)
@@ -65,9 +65,9 @@ pData(mse)$tissue_zone <- as.data.table(pData(mse)) |>
   dplyr::pull(tissue_zone)
 ```
 
-Some features used for segmentation remain. Conducting analysis on these features is double dipping as they have been used to create the ROIs. You can explore this concept in greater detail in `Simulation-2`. `features` will throw warnings if it can't find a close enough m/z value. Assuming that feature was already dropped, that is OK. (Warnings are muted for this chunk.)
+Some features used for segmentation remain. Conducting analysis on these features is double dipping, as they have been used to create the ROIs. You can explore this concept in greater detail in `Simulation-2`. `features` will throw warnings if it can't find a close enough m/z value. Assuming that feature was already dropped, that is OK. (Warnings are muted for this chunk.)
 
-```{r drop_segmenation_mz, warning=FALSE}
+```{r drop_segmentation_mz, warning=FALSE}
 rounded_mz_of_ROI_segmentation_ions <- c(1141.5556, 1142.524, 1570.6786, 
                                         1571.6801, 1572.6808, 1592.6699, 
                                         1593.6739, 1594.6766, 1608.6582)
@@ -145,7 +145,7 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 
 Clustering of related features is an active field of research with many implementations. Choosing a clustering algorithm should be done based on what you want to cluster (related molecules, spatial analogs, isotopes, adducts, precursors, etc.) and the methods to cluster (spatial similarity, kendrick mass defect, intensity ratios, etc.). As such, we treat feature clustering as an interchangeable step that takes in MSIs and meaningful feature clusters to the experiment.
 
-As of version 3.6, Cardinal does not offer feature clustering methods. In this work we have used DeepION ([ACS Paper](doi.org/10.1021/acs.analchem.3c05002), [Github](https://github.com/gankLei-X/DeepION)) to cluster isotopes. We have also explored mzClustering ([Bioinformatics Paper](https://doi.org/10.1093/bioinformatics/btad067), [Original Github](https://github.com/DanGuo1223/mzClustering), [Github of install ready version, made possible by Nihira Golasangi](https://github.com/NihiraGolasangi/mzClustering-mass-spectrometry-imaging)). At the time of publication these methods were experimentally tested but lacked easy to install implementations. mzClustering has been updated by Nihira Golasangi to be install ready from Github. DeepION may require more work to reconcile package conflicts, especially if using Apple M series chipsets. Because theses methods are exist external to this workflow and interchangeable with other clustering methodologies, we will prepare the input files for both methods and provide the output of DeepION for clustering.
+As of version 3.6, Cardinal does not offer feature clustering methods. In this work we have used DeepION ([ACS Paper](https://doi.org/10.1021/acs.analchem.3c05002), [Github](https://github.com/gankLei-X/DeepION)) to cluster isotopes. We have also explored mzClustering ([Bioinformatics Paper](https://doi.org/10.1093/bioinformatics/btad067), [Original Github](https://github.com/DanGuo1223/mzClustering), [Github of install-ready version, made possible by Nihira Golasangi](https://github.com/NihiraGolasangi/mzClustering-mass-spectrometry-imaging)). At the time of publication, these methods were experimentally tested but lacked easy-to-install implementations. mzClustering has been updated by Nihira Golasangi to be install-ready from Github. DeepION may require more work to reconcile package conflicts, especially if using Apple M series chipsets. Because these methods exist external to this workflow and are interchangeable with other clustering methodologies, we will prepare the input files for both methods and provide the output of DeepION for clustering.
 
 Both methods use spatial similarity to cluster features. mzClustering creates groups of similar features, while DeepION tests similarity of possible isotopes, as determined by mass differences. To adapt these methods to multi-tissue clustering, we must force the methods to cluster all the samples together. As all samples share the same m/z axis, we can achieve this by stitching together samples' intensity matrices. Both of these methods are computationally intensive, especially when used to cluster multiple tissue in unison. Additionally, these methods were designed to run on Nvidia GPUs (using CUDA) and must be adapted to run on Apple M series Metal GPU frameworks.
 
@@ -190,7 +190,7 @@ new_dimension <- ceiling(sqrt(len))
 print(paste("Square Image Dimension:",new_dimension))
 ```
 
-Write the intensity matrices for the algorithms. Both algorithms take the file name as arguments. DeepION also requires the a vector of m/z values to compute possible isotope candidates. This will take a second as these files are large.
+Write the intensity matrices for the algorithms. Both algorithms take the file name as arguments. DeepION also requires a vector of m/z values to compute possible isotope candidates. This will take a second as these files are large.
 
 ```{r create_algo_matrix_write}
 write.table(new_k,
@@ -210,7 +210,7 @@ write.table(mz(mse),
             col.names = F)
 
 
-# garbage collect these so they aren't taking up valuable memeory
+# garbage collect these so they aren't taking up valuable memory
 rm(k, new_k)
 ```
 
@@ -218,7 +218,7 @@ rm(k, new_k)
 
 ## Read and preprocess DeepION clustering outputs
 
-We have supplied the clustering output of DeepION. Each row in DeepION's output represents an isotope grouping. This process works for any clustering schema (not unique to DeepION) that produces outputs similar to DeepION, though it may require some adaptation.
+We have supplied the clustering output of DeepION for a specific stitched-image dimension. Each row in DeepION's output represents an isotope grouping. This process works for any clustering schema (not unique to DeepION) that produces outputs similar to DeepION, though it may require some adaptation.
 
 ```{r read_deepion_output}
 mse <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered.imzML")) |>
@@ -262,7 +262,7 @@ knitr::kable(head(iso_merged))
 
 ## Aggregate feature clusters by selecting representative features with the highest mean intensity
 
-As we are aggregating features by selecting the feature with the highest mean intensity to serve as each isotope group's representative feature.
+We will aggregate features by selecting the feature with the highest mean intensity to serve as each isotope group's representative feature.
 
 ```{r row_means_matter}
 mse_no_background_filtered <- mse |>
@@ -296,7 +296,7 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
                 verbose = F)
 ```
 
-Like during initial peak picking, we will apply a filter that will save us a lot of trouble later during statistical modeling. Highly sparse features create unstable estimates of mean abundance. The models detailed in this work assume normal distributions of residuals. Zero inflation will cause serious deviation from this assumption, yielding poor fit and invalid results. To keep things simple, we will drop features that are very sparse in the Cartilage ROI. This represents a conservative modeling approach and will drastically reduce the number of feature we continue analysis with. Alternate options include using models that are invariant to zero inflation.
+Like during initial peak picking, we will apply a filter that will save us a lot of trouble later during statistical modeling. Highly sparse features create unstable estimates of mean abundance. The models detailed in this work assume normal distributions of residuals. Zero inflation will cause serious deviation from this assumption, yielding poor fit and invalid results. To keep things simple, we will drop features that are very sparse in the cartilage ROI. This represents a conservative modeling approach and will drastically reduce the number of features we continue analysis with. Alternate options include using models that are invariant to zero inflation.
 
 ```{r}
 filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
@@ -328,7 +328,7 @@ filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
 }
 ```
 
-Drop features with greater than 25% sparsity in any run.
+Drop features that are present (non-zero and finite) in fewer than 25% of pixels in any run.
 
 ```{r}
 mse_cartilage <- subsetPixels(mse, tissue_zone== "cartilage")

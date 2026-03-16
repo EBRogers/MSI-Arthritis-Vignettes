@@ -963,6 +963,7 @@ writeMSIDataSafe(normalized, file.path("Data",
                                         "normalized.imzML"))
 ```
 
+Below creates figures from the paper.
 ```{r fig-peakpicking-b, results='hide', warning=FALSE, message=FALSE, echo=FALSE}
 png(filename = file.path("Recreated-Figures", 
       "Figure-Peakpicking-Preprocessed.png"), 

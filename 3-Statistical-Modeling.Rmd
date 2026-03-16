@@ -179,47 +179,6 @@ mse_frame <- as_tibble(fData(mse)) |>
   mutate_at(vars(feature_id, subject, condition, tissue), factor) |> 
   arrange(feature_id, condition, tissue, subject) |> 
   select(feature_id, mz, run, cartilage.mean, subject, condition, tissue)
-
-mse_frame_nnzero <- as_tibble(fData(mse)) |>
-  mutate(feature_id = row_number()) |>
-  pivot_longer(
-    X6891.OA.lateral.nnzero:X6954.OA.medial.nnzero,
-    names_to = "run",
-    values_to = "cartilage.nnzero",
-    names_pattern = "X(.+)\\.nnzero$",
-    names_transform = list(run = ~ str_replace_all(.x, "\\.", "-"))
-  ) |>
-  left_join(name_tibble, by = join_by(run)) |>
-  mutate_at(vars(feature_id, subject, condition, tissue), factor) |> 
-  arrange(feature_id, condition, tissue, subject) |> 
-  select(feature_id, mz, run, cartilage.nnzero, subject, condition, tissue) |>
-  left_join(as_tibble(pData(mse)) |> group_by(run) |> count()) |>
-  mutate(prop_nnzero = cartilage.nnzero/n)
-
-  df <- mse_frame_nnzero |>
-  group_by(feature_id) |>
-  mutate(feature_mean = mean(prop_nnzero)) |>
-  ungroup() |>
-  group_by(tissue, condition, feature_id) |>
-  summarize(group_mean = mean(prop_nnzero) ,
-            group_mean_norm = mean(prop_nnzero) - mean(feature_mean))
-
-  ggplot(df, aes(y = group_mean_norm)) +
-  geom_histogram(bins = 50) +
-  facet_wrap(~ condition + tissue, scales = "free_x", nrow = 1)
- 
-
-mse_frame_nnzero |>
-  ggplot(aes(x = run, y = prop_nnzero)) +
-  geom_boxplot(outlier.shape = NA) +
-  facet_wrap(~ condition + tissue, scales = "free_x", nrow = 1)
-
-mse_frame_nnzero |>
-  ggplot(aes(y = prop_nnzero)) +
-  geom_histogram(bins = 50) +
-  facet_wrap(~ condition + tissue + subject, scales = "free_x", nrow = 1) +
-  ylim(0,1)
-
 ```
 
 ```{r, echo=FALSE}
@@ -249,10 +208,18 @@ As we can see, most of the singular models have ICC values near zero (less than 
 
 # Evaluating Model Assumptions
 
-Linear mixed effects models make several assumptions that must be checked to ensure statistical validity. There are many ways to express these assumptions but in general they are that random effects and residuals independent, are normally distributed, and have constant variance. We can assess these assumptions with residual quantile-quantile (QQ) plots. As there are hundreds of models, we will randomly sample 20 to plot.
+Linear mixed effects models make several assumptions that must be checked to ensure statistical validity. There are many ways to express these assumptions but in general they are that random effects and residuals independent, are normally distributed, and have constant variance. We can assess these assumptions with residual quantile-quantile (QQ) plots.
+
+Simple QQ plots can be generated with the following base R functions.
 
 ```{r}
+qqnorm(resid(cartilage_res[[1]][[1]]), main = "Q-Q Plot of Residuals")
+qqline(resid(cartilage_res[[1]][[1]]), col = "red")
+```
 
+We will generate more infomative qq plots. This code creates a tibble of residuals and fitted values from each model.
+
+```{r}
 qq_plot_frame <- NULL
 set.seed(2025)
 selected_fids <- sort(sample(names(cartilage_res[[1]]), 20))
@@ -264,8 +231,10 @@ for (fid in names(cartilage_res[[1]])) {
                                feature_id = fid),
                                model.frame(model)))
 } 
+```
 
-
+Then we can compute theoretical normal quantiles.
+```{r}
 qq_plot_frame <-
   qq_plot_frame |>
   mutate(feature_id = as.numeric(feature_id)) |>
@@ -289,11 +258,10 @@ qq_plot_frame$tissue = factor(qq_plot_frame$tissue,
 levels = c("Medial","Lateral"))
   
 fids <- unique(qq_plot_frame$feature_id)
-
 ```
 
-Lets also investigate by condition and tissue.
 
+Additioanlly, lets generate interaction plots that will help us see the signal and effect being modeled.
 
 ```{r}
 manage_directory("QQ-Itx-SII-Plots")
@@ -314,9 +282,6 @@ melted <- melt(result, id.vars = c("x", "y", "tissue_zone", "run", "subject", "c
                 variable.name = "feature", 
                 value.name = "intensity")
 melted[, feature := sub("^feature_", "", feature)]
-```
-
-```{r}
 
 sii <- function(fid, bone_alpha = 0.3, background_alpha = 1){
   df <- melted |>
@@ -433,6 +398,7 @@ itx_fancy <- function(tmp_df){
 }
 ```
 
+This code will generate a plot for every model, saving them in `./QQ-Itx-SII-Plots` directory.
 ```{r}
 for (f in fids) {
 
@@ -541,12 +507,8 @@ if (round(unique(tmp_df$mz)[1], 2) == 1438.66) {
 }
 ```
 
-
-In general, the residuals appear to be normally distributed - the points fall roughly along the reference line. This indicates that the residuals are generally normally distributed. Ideally, we would also verify normality of the random effect distributions using `hist(ranef(model)$subject[[1]])`, but with only 8 subjects, this is not very informative.
-
-
+QQ plots
 ```{r}
-library(ggpubr)
 set.seed(2025)
 
 n <- 16
@@ -578,6 +540,7 @@ ggplot(df, aes(sample = sample)) +
   facet_wrap(~ scenario, scales = "free") +
   labs(x = "Theoretical (Normal) Quantiles",
        y = "Residual Quantiles")
+
 ggsave("Recreated-Figures/SI-Figure-Statistical-Modeling-QQ-Examples.png", width = 8, height = 4)
 
 #---------------------------
