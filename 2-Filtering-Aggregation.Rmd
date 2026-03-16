@@ -3,7 +3,6 @@ title: "2-Filtering-Aggregation"
 author: "Ethan Rogers"
 output:
   html_document: default
-  pdf_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -21,181 +20,132 @@ local({
 })
 ```
 
-Filtering and aggregation of peak-picked and normalized MSI data further concentrate signal and reduce noise. Additionally, these steps reduce the number of features, and therefore the number statistical comparisons. Fewer tests means less stringent multiple hypothesis correction, and greater experimental sensitivity. Unfortuantly feature clustering is computationally intensive and may require access to high performance computing resources.
+Filtering and aggregation of peak-picked and normalized MSI data further concentrate signal and reduce noise. Additionally, these steps reduce the number of features, and therefore the number statistical comparisons. Fewer tests means less stringent multiple hypothesis correction, and greater experimental sensitivity. Unfortunately feature clustering is computationally intensive and may require access to high performance computing resources.
 
 ## Load required packages and data
 
 ```{r library, results='hide', warning=FALSE, message=FALSE}
-library(tidyverse)
-library(Cardinal)
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(ggplot2)
 library(data.table)
 library(fuzzyjoin)
+library(Cardinal)
 source("Utilities.R")
+
+zero_to_na <- function(x, mz) {
+  x[x == 0] <- NA_real_
+  x
+}
 ```
 
 ## Find peak-picked and normalized imzML files
 
 ```{r find_imzML}
-DATA_PATH <- file.path("Data/Peakpicked-Normalized")
-MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
-                            recursive = TRUE)
+COMBINED_DATA_PATH <- file.path("Data","Preprocessing","normalized.imzML")
 load("Outputs/roi_list.RData")
 ```
 
 ## Load peak-picked imzML files
 
-We will keep them in a named list for now. Two images have areas of zero intensity, so they are trimmed. As these images are images of tibial plateaus, we will flip some images so that the cartilage is always on top. We will also assign the regions of interest using the saved names list from `2-ROI-Segmentation`.
+We will load the combined, normalized, peak-picked image. We will then replace zero's with NAs. ImzML format does not respect NA values, so Cardinal will read them as zeros when reloaded. We will also join the ROIs created in `1-Preprocessing`.
 
 ```{r load_imzML}
-mse_list_pp_normalized = list()
-for (f in MSE_FILENAMES) {
-  just_fname <- isolate_filename(f)
-  agnostic_step_fname <- sub("^(\\d+)[ab](-[^-]*-[^-]*)-.*$", "\\1\\2", just_fname)
-  m <- readMSIData(file.path(DATA_PATH, f),verbose=F) 
-  
-  if (agnostic_step_fname == "6919-CAD-medial") {
-    m <- Cardinal::subset(m, mz > 0, x <= 390)
-  }
-  if (agnostic_step_fname == "6924-CAD-medial") {
-    m <- Cardinal::subset(m, mz > 0, x <= 367)
-  }
-  
-  if (agnostic_step_fname %in% c("6891-OA-lateral",
-                        "6891-OA-medial",
-                        "6949-OA-lateral",
-                        "6949-OA-medial",
-                        "6954-OA-lateral",
-                        "6954-OA-medial")) {
-    m <- flip_vertically(m)
-  }
-  runNames(m) <- agnostic_step_fname
-  
-  if (agnostic_step_fname %in% names(roi_list)) {
-    pData(m)$tissue_zone <- roi_list[[agnostic_step_fname]]
-  } else {
-    warning(paste0(agnostic_step_fname, " not in roi_list, ROI factor cannot be assigned"), call. = F, immediate. = T)
-  }
-  mse_list_pp_normalized[[agnostic_step_fname]] <- m
-  rm(m)
-}
+mse <- readMSIData(COMBINED_DATA_PATH, verbose = F)
+
+mse <- mse |>
+      addProcessing(zero_to_na, label="zero_to_na_before_filtering") |>
+      process(spectra="intensity", index="mz", 
+                BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
+                verbose = F)
+
+pData(mse)$tissue_zone <- as.data.table(pData(mse)) |>
+  left_join(roi_list, by = c("x","y","run")) |>
+  dplyr::pull(tissue_zone)
 ```
 
-Confirm we have removed the ions used for segmentation. `features` will throw warnings if it can't find a close enough m/z value. Assuming that feature was already dropped, that is OK. (Warnings are muted for this chunk.)
+Some features used for segmentation remain. Conducting analysis on these features is double dipping as they have been used to create the ROIs. You can explore this concept in greater detail in `Simulation-2`. `features` will throw warnings if it can't find a close enough m/z value. Assuming that feature was already dropped, that is OK. (Warnings are muted for this chunk.)
 
 ```{r drop_segmenation_mz, warning=FALSE}
-rounded_mz_of_ROI_segmentation_ions <- c(1141.545, 1570.684, 1571.687, 1572.688, 
-                                         1592.678, 1593.679, 1594.675, 1608.677)
+rounded_mz_of_ROI_segmentation_ions <- c(1141.5556, 1142.524, 1570.6786, 
+                                        1571.6801, 1572.6808, 1592.6699, 
+                                        1593.6739, 1594.6766, 1608.6582)
 
-indices_of_ROI_segmentation_ions <- features(mse_list_pp_normalized[[1]], 
-                                             mz = rounded_mz_of_ROI_segmentation_ions, 
-                                             tolerance = .1, 
-                                             units = "mz")
+indices_of_ROI_segmentation_ions <- features(mse, 
+                            mz = rounded_mz_of_ROI_segmentation_ions, 
+                            tolerance = .001, 
+                            units = "mz")
+
+# If following the vignettes exactly the above step should yield two indicies
 
 if (length(indices_of_ROI_segmentation_ions) >= 1) {
-  mse_list_pp_normalized <- lapply(mse_list_pp_normalized, FUN = function(x) {
-  Cardinal::subset(x, mz %ni% fData(x)[indices_of_ROI_segmentation_ions,])
-  })
+  # work around as mse[-indicies_to_drop] not supported
+  mse <- mse[setdiff(1:nrow(mse), indices_of_ROI_segmentation_ions), ]
 }
 ```
 
 # Non-specific filtering
 
-We will be filtering by mean and standard deviation. We assume that noisy, non-informative features have low variation and low intensity. For simplicity, we will drop features where sample-wide mean intensity and standard deviation are both in the bottom 25th percentile.
+We will be filtering by mean and standard deviation. We assume that noisy, non-informative features have low variation and low intensity. For simplicity, we will drop features where sample-wide mean intensity and standard deviation are both in the bottom 25th percentile in non-background pixels.
 
-## Method 1: Using Cardinal core functions and out-of-memory data structures
-
-Time: \~5-20 minutes, highly dependent on hardware configuration
-
-*Benefits:* keeps large datasets out of memory, simpler to code, easier to understand
-
-*Disadvantages:* time intensive (can be improved with multiprocessing), can only compute functions with `matter` implementations (see `?summarizeFeatures` for a list of functions)
-
-First, we will bind all the images together, excluding background pixels. This will create a large MSE with all pixels from all samples (minus background) and all features. Different samples are differentiated by run names
+First, we will drop background pixels.
 
 ```{r ns_filt_compute_cardinal}
-mse_all_no_background <- subsetPixels(mse_list_pp_normalized[[1]], tissue_zone!= "background")
-for (i in 2:16) {
-  mse_all_no_background <- cbind(mse_all_no_background,
-                   subsetPixels(mse_list_pp_normalized[[i]], tissue_zone!= "background"))
-}
+mse_no_background <- subsetPixels(mse, tissue_zone!= "background")
 ```
 
-Now we can compute the mean and standard deviation of each feature across all samples. This will take some time as `summarizeFeatures` is not parallelized by default, and the MSE is large. You can use the [`BPPARAM` argument](https://www.bioconductor.org/packages/devel/bioc/vignettes/Cardinal/inst/doc/Cardinal3-guide.html#parallel-computing-using-biocparallel) to speed this up.
+Now we can compute the mean and standard deviation of each feature across all samples.
 
 ```{r}
-mse_all_no_background_summarized <- summarizeFeatures(mse_all_no_background,
-                                                      stat = c("mean", "sd"))
+mse_no_background <- summarizeFeatures(mse_no_background,
+                                       stat = c("mean", "sd", "nnzero"),
+                                       na.rm = TRUE,
+                                       BPPARAM = SnowfastParam(workers = 12L, 
+                                                               force.GC = TRUE),
+                                       verbose = F)
+
 ```
 
-Now we can identify features to drop. We will keep features where either the mean or standard deviation is above the 25th percentile.
+Now we can identify features to drop.
 
 ```{r}
-mz_to_keep_Cardinal_method <- mz(subsetFeatures(mse_all_no_background_summarized, 
-                                      !(sd < quantile(sd, p = 0.25) & 
-                                          mean < quantile(mean, p = 0.25))))
-```
-
-## Method 2: Using data.table
-
-Time: \~30 seconds
-
-*Benefits*: much faster, can compute any function
-
-*Disadvantages*: memory intensive even with `data.table`, complex coding
-
-The code below starts by binding intensity matrices from each sample (along with ROI marker and feature id) into a dataframe. Mean and standard deviation are computed by ROI, and the final output is a list of m/z values to keep, with the same criteria as above.
-
-```{r ns_filt_compute_datatable}
-mz_to_keep_data.table_method <- rbindlist(lapply(seq_along(mse_list_pp_normalized), function(idx) {
-  m <- mse_list_pp_normalized[[idx]]
-  k <- t(as.matrix(intensity(m)))
-  colnames(k) <- paste0("feature_", seq_len(ncol(k)))
-  dt <- cbind(as.data.table(pData(m))[, .(x, y, tissue_zone)], k)
-  dt_long <- melt(dt, 
-                  id.vars = c("x", "y", "tissue_zone"), 
-                  variable.name = "feature", 
-                  value.name = "intensity")
-  dt_long[, feature := sub("feature_", "", feature)
-          ][, sample_id := as.character(idx)]
-  }), use.names = TRUE)[tissue_zone != "background", .(
-    mean = mean(intensity, na.rm = TRUE),
-    sd = sd(intensity, na.rm = TRUE)
-    ), by = feature
-    ][, mz := mz(mse_list_pp_normalized[[1]])
-      ][!(mean < quantile(mean, p = 0.25) & sd < quantile(sd, p = 0.25))
-        ][, mz]
-```
-
-Regardless, both methods produce the same results.
-
-```{r ns_filt_compute_compare_same}
-all(mz_to_keep_Cardinal_method==mz_to_keep_data.table_method)
+mz_to_keep <- mz(subsetFeatures(mse_no_background,
+                                !(sd < quantile(sd, p = 0.25) & 
+                                  mean < quantile(mean, p = 0.25))))
+ 
 ```
 
 Let's visualize the filter.
 
 ```{r ns_filt_visualize}
-as_tibble(fData(mse_all_no_background_summarized)) %>% 
+as_tibble(fData(mse_no_background)) %>% 
   mutate(keep = !(mean < quantile(mean, p = 0.25) & sd < quantile(sd, p = 0.25))) %>% 
   ggplot(aes(x = mean, y = sd, color = keep)) +
-  geom_point()
+  geom_point(alpha = 0.4)
 ```
+
 
 ## Apply the filter
 
-Now apply the filter. The new MSEs will have `r length(mz_to_keep_Cardinal_method)` features.
+Now apply the filter. The new MSE will have `r length(mz_to_keep)` features.
 
 ```{r ns_filt_apply}
-mse_list_pp_normalized <- lapply(mse_list_pp_normalized, function(mse) {
-  subsetFeatures(mse, mz %in% mz_to_keep_data.table_method)
-})
+mse <- subsetFeatures(mse, mz %in% mz_to_keep)
+```
+
+Let's save this for later
+
+```{r}
+writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered.imzML"),
+                verbose = F)
 ```
 
 # Feature clustering
 
-Clustering of related features is an active field of research with many implementations. Choosing a clustering algorthim should be done based on what you want to cluster (related molecules, spatial analogs, isotopes, adducts, precursors, etc.) and the methods to cluster (spatial similarity, kendrick mass defect, intenisty ratios, etc.). As such, we treat feature clustering as an interchangable step that takes in MSIs and menaingful feature clusters to the experiment.
+Clustering of related features is an active field of research with many implementations. Choosing a clustering algorithm should be done based on what you want to cluster (related molecules, spatial analogs, isotopes, adducts, precursors, etc.) and the methods to cluster (spatial similarity, kendrick mass defect, intensity ratios, etc.). As such, we treat feature clustering as an interchangeable step that takes in MSIs and meaningful feature clusters to the experiment.
 
-As of version 3.6, Cardinal does not offer feature clustering methods. In this work we have used DeepION ([ACS Paper](doi.org/10.1021/acs.analchem.3c05002), [Github](https://github.com/gankLei-X/DeepION)) to cluster isotopes. We have also explored mzClustering ([Bioinformatics Paper](https://doi.org/10.1093/bioinformatics/btad067), [Original Github](https://github.com/DanGuo1223/mzClustering), [Github of install ready version, made possible by Nihira Golasangi](https://github.com/NihiraGolasangi/mzClustering-mass-spectrometry-imaging)). At the time of publication these methods were experimentally tested but lacked easy to install implementations. mzClustering has been updated by Nihira Golasangi to be install ready from Github. DeepION may require more work to reconcile package conflicts, especially if using Apple M series chipsets. Because theses methods are exist external to this workflow and interchangable with other clustering methodologies, we will prepare the input files for both methods and provide the output of DeepION for clustering.
+As of version 3.6, Cardinal does not offer feature clustering methods. In this work we have used DeepION ([ACS Paper](doi.org/10.1021/acs.analchem.3c05002), [Github](https://github.com/gankLei-X/DeepION)) to cluster isotopes. We have also explored mzClustering ([Bioinformatics Paper](https://doi.org/10.1093/bioinformatics/btad067), [Original Github](https://github.com/DanGuo1223/mzClustering), [Github of install ready version, made possible by Nihira Golasangi](https://github.com/NihiraGolasangi/mzClustering-mass-spectrometry-imaging)). At the time of publication these methods were experimentally tested but lacked easy to install implementations. mzClustering has been updated by Nihira Golasangi to be install ready from Github. DeepION may require more work to reconcile package conflicts, especially if using Apple M series chipsets. Because theses methods are exist external to this workflow and interchangeable with other clustering methodologies, we will prepare the input files for both methods and provide the output of DeepION for clustering.
 
 Both methods use spatial similarity to cluster features. mzClustering creates groups of similar features, while DeepION tests similarity of possible isotopes, as determined by mass differences. To adapt these methods to multi-tissue clustering, we must force the methods to cluster all the samples together. As all samples share the same m/z axis, we can achieve this by stitching together samples' intensity matrices. Both of these methods are computationally intensive, especially when used to cluster multiple tissue in unison. Additionally, these methods were designed to run on Nvidia GPUs (using CUDA) and must be adapted to run on Apple M series Metal GPU frameworks.
 
@@ -204,10 +154,7 @@ Both methods use spatial similarity to cluster features. mzClustering creates gr
 First, extract the intensity matrix of each sample, and bind their columns. Both algorithms take a matrix of features and pixels as input - mzClustering requires features $\times$ pixels while DeepION requires the transpose (pixels $\times$ features).
 
 ```{r create_algo_matrix}
-k <- NULL
-for (n in names(mse_list_pp_normalized)) {
-  k <- cbind(k, as.matrix(intensity(mse_list_pp_normalized[[n]])))
-}
+k <- as.matrix(intensity(mse))
 ```
 
 Each row of a MSE intensity matrix represents a feature, and each column a pixel. Matrix values are intensities. Keep in mind that MSEs are (usually) irregularly shaped, and `Cardinal` only stores the intensities that are actual sample values. This presents an issue: both DeepION and mzClustering require rectangular images.
@@ -227,7 +174,7 @@ delta <- new_col - len
 new_k <- cbind(k, matrix(0, nrow = nrow(k), ncol = delta))
 ```
 
-Another caveat is that DeepION and mzClustering cannot handle NA values. As MSIs experience intensity dependent missingness we will zero-fill NA values.
+In a twist of irony, DeepION and mzClustering cannot handle NA values. As MSIs experience intensity dependent missingness we will zero-fill NA values.
 
 ```{r create_algo_matrix_na_zero_fill}
 new_k <- replace(new_k, is.na(new_k), 0)
@@ -243,24 +190,25 @@ new_dimension <- ceiling(sqrt(len))
 print(paste("Square Image Dimension:",new_dimension))
 ```
 
-Write the intensity matrices for the algorithms. Both algorithms take the file name as arguments. DeepION also requires the a vector of m/z values to compute possible isotope candidates.
+Write the intensity matrices for the algorithms. Both algorithms take the file name as arguments. DeepION also requires the a vector of m/z values to compute possible isotope candidates. This will take a second as these files are large.
 
 ```{r create_algo_matrix_write}
 write.table(new_k,
-            file="Outputs/super_image_for_mzClustering_algo.txt",
+            file=file.path("Outputs",paste0("super_image_",new_dimension,"_for_mzClustering.txt")),
             row.names = F,
             col.names = F)
 
 write.table(t(new_k),
-            file="Outputs/super_image_for_DeepION.txt",
+            file=file.path("Outputs",paste0("super_image_",new_dimension,"_for_DeepION.txt")),
             row.names = F,
             col.names = F)
 
 # for DeepION algo (needs the image matrix transposed and a vector of the MZ values)
-write.table(mz(mse_list_pp_normalized[[1]]),
-            file="Outputs/mz_vector_for_DeepION.txt",
+write.table(mz(mse),
+            file=file.path("Outputs","mz_vector_for_DeepION.txt"),
             row.names = F,
             col.names = F)
+
 
 # garbage collect these so they aren't taking up valuable memeory
 rm(k, new_k)
@@ -273,7 +221,13 @@ rm(k, new_k)
 We have supplied the clustering output of DeepION. Each row in DeepION's output represents an isotope grouping. This process works for any clustering schema (not unique to DeepION) that produces outputs similar to DeepION, though it may require some adaptation.
 
 ```{r read_deepion_output}
-deepion_iso_output_file <- "Outputs/DeepION_output_col_mode_super_image_all_features.txt"
+mse <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered.imzML")) |>
+      addProcessing(zero_to_na, label="zero_to_na_before_filtering") |>
+      process(spectra="intensity", index="mz", 
+                BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
+                verbose = F)
+
+deepion_iso_output_file <- file.path("Outputs", "output_super_image_708.txt")
 iso <- readr::read_csv(deepion_iso_output_file, show_col_types = F) %>% 
   mutate(group_id = row_number())
 knitr::kable(head(iso))
@@ -296,82 +250,252 @@ Unfortunately DeepION does not preserve all decimal points of the original m/z v
 
 ```{r fuzzyjoin_deepion_output}
 iso_merged <- iso %>% 
-  difference_right_join(tibble(mz = as.numeric(mz(mse_list_pp_normalized[[1]])), 
-                              feature_id = 1:nrow(fData(mse_list_pp_normalized[[1]]))),
+  difference_right_join(tibble(mz = as.numeric(mz(mse)), 
+                              feature_id = 1:nrow(fData(mse))),
                        by = 'mz',
-                       max_dist = 0.000001,
+                       max_dist = 0.0001,
                        distance_col = "mz_delta") %>% 
   dplyr::select(group_id, feature_id, `mz.y`) %>% 
   dplyr::rename("mz" = `mz.y` )
-knitr::kable(head(merged))
+knitr::kable(head(iso_merged))
 ```
 
 ## Aggregate feature clusters by selecting representative features with the highest mean intensity
 
-As we are aggregating features by selecting the feature with the highest mean intensity to serve as each isotope group's representative feature, we must computer the feature means across all samples. We can do this in a variety of ways - using either of the above methods, or using matter out of memory data structures themselves.
-
-```{r bind_matter_intensity}
-mat <- intensity(mse_list_pp_normalized[[1]])
-
-for (i in 2:16) {
-  mat <- cbind(mat, intensity(mse_list_pp_normalized[[i]]))
-}
-```
-
-Using `matter::mem` we can inspect if the data are in or out of memory.
-
-```{r mem_matter}
-matter::mem(mat)
-```
-
-We can use `matter::rowMeans` to compute each row's mean, however this operation can take some time. Becuase the matrix does not have a particularly large memory footprint, we will instead cast it to a base R matrix and use base R `rowMeans`. Also, when we're done, let's garbage collect the intensity matrix object to free up some memory.
+As we are aggregating features by selecting the feature with the highest mean intensity to serve as each isotope group's representative feature.
 
 ```{r row_means_matter}
-iso_merged$full_sample_mean <- rowMeans(as.matrix(mat), na.rm = T)
-rm(mat)
-gc()
+mse_no_background_filtered <- mse |>
+                              subsetPixels(tissue_zone != "background") |>
+                              subsetFeatures(mz %in% iso_merged$mz) |>
+                              summarizeFeatures(stat = "mean", na.rm = T)
+
+iso_merged$mean <- as.vector(fData(mse_no_background_filtered)$mean)
 ```
 
-Now let's define a function to aggregate isotope groups, keeping only the feature with the highest mean in each group.
+Now let's drop low abundance isotopes, keeping only the feature with the highest mean in each group.
 
 ```{r}
-reduce_to_candidate_feature_in_group <- function(mse,
-                                                 group_frame,
-                                                 na.rm = TRUE) {
-  # validation checks to ensure the correct columns are present in the group_frame
-  stopifnot(
-    "group_id" %in% names(group_frame) &
-      "mz" %in% names(group_frame) &
-      "feature_id" %in% names(group_frame) &
-      "full_sample_mean" %in% names(group_frame)
-  )
-
-  # check to ensure all mz for grouping_frame and mse
-  stopifnot(all(mz(mse)==group_frame$mz))
+#sanity check
+all(mz(mse)==iso_merged$mz)
   
-  subsetFeatures(mse, 
-                 mz %in% (group_frame %>% 
-                            group_by(group_id) %>% 
-                            filter(full_sample_mean == max(full_sample_mean)) %>% 
-                            ungroup() %>% 
-                            pull(mz)))
+isotopes_to_keep <- iso_merged %>% 
+                          group_by(group_id) %>% 
+                          filter(mean == max(mean)) %>% 
+                          ungroup() %>% 
+                          pull(mz)
+
+mse <- subsetFeatures(mse, mz %in% isotopes_to_keep)
+
+```
+
+Save this intermediate.
+
+```{r}
+writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated.imzML"),
+                verbose = F)
+```
+
+Like during initial peak picking, we will apply a filter that will save us a lot of trouble later during statistical modeling. Highly sparse features create unstable estimates of mean abundance. The models detailed in this work assume normal distributions of residuals. Zero inflation will cause serious deviation from this assumption, yielding poor fit and invalid results. To keep things simple, we will drop features that are very sparse in the Cartilage ROI. This represents a conservative modeling approach and will drastically reduce the number of feature we continue analysis with. Alternate options include using models that are invariant to zero inflation.
+
+```{r}
+filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
+                                   run_col = "run",
+                                   spectra_name = "intensity"){
+  pd <- pixelData(mse)
+  run <- pd[[run_col]]
+  if (is.null(run)) stop("pixelData(mse)$", run_col, " is NULL")
+  run <- as.factor(run)
+
+  X <- spectra(mse, spectra_name)
+
+  keep <- rep_len(TRUE, nrow(mse))
+
+  for (lv in levels(run)) {
+    cols <- which(run == lv)
+    if (length(cols) == 0L) next
+
+    Xr <- X[, cols, drop = FALSE]
+
+    # present iff finite AND non-zero
+    present_counts <- rowSums(is.finite(Xr) & (Xr != 0))
+
+    freq <- present_counts / length(cols)
+    keep <- keep & (freq >= cutoff)
+  }
+
+  mse[keep, , drop = FALSE]
 }
+```
+
+Drop features with greater than 25% sparsity in any run.
+
+```{r}
+mse_cartilage <- subsetPixels(mse, tissue_zone== "cartilage")
+
+mse_cartilage <- summarizeFeatures(mse_cartilage,
+                                  stat = c("mean", "sd", "nnzero"),
+                                  na.rm = TRUE,
+                                  groups = mse_cartilage$run,
+                                  verbose = F)
+
+mse_cartilage_filt <- filterFeaturesByRunFreq(mse_cartilage, 0.25)
+
+as_tibble(pData(mse_cartilage)) |> count(run)
+
+as_tibble(fData(mse_cartilage)) |>
+  mutate(keep = mz %in% mz(mse_cartilage_filt)) |>
+  ggplot(aes(x = mean, y = sd, color = keep)) +
+  geom_point() 
+```
+
+
+Save the as .imzML files. Onward to modeling!
+
+```{r}
+mse <- subsetFeatures(mse, mz %in% mz(mse_cartilage_filt))
+
+writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"),
+                verbose = F)
+```
+
+
+### Code to recreate figures
+
+```{r}
+
+mse_pp <- readMSIData(file.path("Data", "Preprocessing", "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"),
+  verbose = F)
+cat("After Peak Picking ",length(mz(mse_pp)), "\n")
+
+
+bg_mz_approx <- c(1570.6786, 1571.6801, 1572.6808, 1592.6699, 1593.6739, 1594.6766)
+cat("After dropping internal standard ions [-6]) ", length(mz(mse_pp))-length(bg_mz_approx), "\n")
+
+
+mse_pre_filt <- readMSIData(COMBINED_DATA_PATH)
+other_ions_in_roi_selection <- c(1141.5556, 1142.524, 1608.6582)
+cat("After dropping other ions used in ROI selection [-3] and before NS filtering ",
+  length(mz(mse_pre_filt)) - length(other_ions_in_roi_selection),"\n")
+
+mse_ns_filt <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered.imzML"),
+  verbose = F)
+cat("After NS filtering ",length(mz(mse_ns_filt)),"\n")
+
+mse_deiso <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated.imzML"),
+  verbose = F)
+cat("After deiso ",length(mz(mse_deiso)),"\n")
+
+mse_cart_filtered <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"),
+  verbose = F)
+cat("After cartilage sparsity filtering ", length(mz(mse_cart_filtered)), "\n")
 
 ```
 
-Perform the feature aggregation using the above function.
 
 ```{r}
-mse_list_pp_normalized_reduced <- lapply(mse_list_pp_normalized, FUN = function(m) {
-  reduce_to_candidate_feature_in_group(m,
-                                       iso_merged,
-                                       na.rm = TRUE)
-  
-})
+
+cat("Approximate m/z of preselected features used to segment cartilage (and isotopes/spatial analogs): ", 
+  paste(round(c(1141.5556, 1142.524),3), collapse = ", "), "\n")
+cat("Approximate m/z of preselected features used to segment background (and isotopes/spatial analogs): ", 
+  paste(round(c(1570.6786, 1571.6801, 1572.6808, 1592.6699,1593.6739, 1594.6766, 1608.6582),3), collapse = ", "), "\n")
+cat("Approximate m/z of features removed by non-specific filtering: ", 
+  paste(setdiff(round(setdiff(mz(mse_pre_filt), mz(mse_ns_filt)),3), round(other_ions_in_roi_selection, 3)), collapse = ", "), "\n")
+
+
+cat("Single ion isotopes: ", 
+  paste(round(iso_merged |> group_by(group_id) |> filter(n() == 1) |> pull(mz),3), collapse = ", "), "\n")
+cat("Double ion isotopes: ", 
+  paste(round(iso_merged |> group_by(group_id) |> filter(n() == 2) |> pull(mz),3), collapse = ", "), "\n")
+cat("Triple ion isotopes: ", 
+  paste(round(iso_merged |> group_by(group_id) |> filter(n() == 3) |> pull(mz),3), collapse = ", "), "\n")
+
+
+cat("Approxiamte m/z features dropped during Cartilage ROI sparsity filtering: ", 
+  paste(round(setdiff(mz(mse_deiso), mz(mse_cart_filtered)),3), collapse = ", "), "\n")
+
 ```
 
-Save the images as .imzML files using a custom function that generates the standard directory tree.
 
 ```{r}
-write_MSI_list(mse_list_pp_normalized_reduced, "Data/Peakpicked-Normalized-Aggregated")
+
+knitr::kable(
+  iso_merged |>
+    group_by(group_id) |>
+    mutate(`Isotopes in a group` = n()) |>
+    ungroup() |>
+    group_by(`Isotopes in a group`) |>
+    summarize(
+      `Count of ions`   = n(),
+      `Count of groups` = n_distinct(group_id),
+      .groups = "drop"
+    )
+)
+
+m <- subsetPixels(mse_ns_filt, mse_ns_filt$run == "6891-OA-lateral")
+
+jl_3 <- sort(unique(iso_merged %>% group_by(group_id) %>% 
+  mutate(n = n()) %>% ungroup() %>% filter(n == 3) %>% pull(group_id)))
+
+id_1 <- iso_merged %>% filter(group_id %in% c(258)) %>% pull(feature_id)
+id_2 <- iso_merged %>% filter(group_id %in% c(312)) %>% pull(feature_id)
+id_3 <- iso_merged %>% filter(group_id %in% c(566)) %>% pull(feature_id)
+
+png(filename = file.path("Recreated-Figures","Figure-clusters-3-isotope-sii.png"), width = 1500, height = 900, pointsize = 54)
+image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3]), 
+      scale = F, 
+      superpose = F, 
+      layout = c(3,3), 
+      key = F, 
+      grid = F,
+      xaxt = "n",
+      yaxt = "n",
+      ylab = NA,
+      xlab = NA)
+dev.off()
+
+######### 38, 41, 45, 50, 65
+jl <- sort(unique(iso_merged %>% group_by(group_id) %>% mutate(n = n()) %>% ungroup() %>% filter(n == 2) %>% pull(group_id)))
+id_1 <- iso_merged %>% filter(group_id == jl[3]) %>% pull(feature_id)
+id_2 <- iso_merged %>% filter(group_id == jl[6]) %>% pull(feature_id)
+id_3 <- iso_merged %>% filter(group_id == jl[11]) %>% pull(feature_id)
+
+png(filename = file.path("Recreated-Figures","Figure-clusters-2-isotope-sii.png"), width = 1500, height = 700, pointsize = 54)
+image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]), 
+      scale = F, 
+      superpose = F, 
+      layout = c(2,3), 
+      key = F, 
+      grid = F,
+      xaxt = "n",
+      yaxt = "n",
+      ylab = NA,
+      xlab = NA)
+dev.off()
+
+
+```
+
+### Code to recreate tables
+
+```{r}
+
+paste0(iso_merged %>% 
+         group_by(group_id) %>% 
+         mutate(n = n()) %>% 
+         ungroup() %>% filter(n == 1) %>% mutate(mzr = round(mz, 4)) %>% pull(mzr),
+       collapse = ", ")
+
+paste0(iso_merged %>% 
+         group_by(group_id) %>% 
+         mutate(n = n()) %>% 
+         ungroup() %>% filter(n == 2) %>% mutate(mzr = round(mz, 4)) %>% pull(mzr),
+       collapse = ", ")
+
+paste0(iso_merged %>% 
+         group_by(group_id) %>% 
+         mutate(n = n()) %>% 
+         ungroup() %>% filter(n == 3) %>% mutate(mzr = round(mz, 4)) %>% pull(mzr),
+       collapse = ", ")
+
 ```

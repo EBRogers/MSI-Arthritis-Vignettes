@@ -3,3 +3,163 @@ title: "5-Designing-Future-Experiments"
 output: html_document
 ---
 
+```{r}
+library(tidyverse)
+library(Cardinal)
+library(lmerTest)
+library(emmeans)
+source("Utilities.R")
+
+load(file.path("Outputs","cartilage_results.RData"))
+load("Outputs/signift_cartilage.RData")
+
+model_fit_eval <- read_csv("Outputs/feature-model-fit-evaluation.csv") |> 
+  mutate(across(qq_normality:outliers, as.factor))
+
+passed <- model_fit_eval |> 
+          filter(qq_normality == "OK" & 
+            residual_variance == "OK" & 
+            outliers == "OK" )
+
+cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
+
+df_var <- bind_rows(lapply(cartilage_models_OK_fit, function(m) {
+  vc <- as.data.frame(VarCorr(m))
+  sigma2_subject <- vc$vcov[1]
+  sigma2_residual <- attr(VarCorr(m), "sc")^2
+  return(tibble(sigma2_residual = sigma2_residual, 
+                sigma2_subject = sigma2_subject,
+                intercept = coef(summary(m))[1,1],
+                condition = abs(coef(summary(m))[2,1]),
+                subtissue = abs(coef(summary(m))[3,1])))
+})) %>% mutate(id = "Cartilage", feature_id = row_number())
+
+
+FDR = 0.05
+power = 0.9
+
+median.sigma.subject = median(df_var$sigma2_subject, na.rm = T)
+median.sigma.error = median(df_var$sigma2_residual, na.rm = T)
+median_denom_for_pct_delta = median(signift_cartilage$reference_estimate, na.rm = T)
+
+## Large portion of proteins are not changing
+# m0_m1 <- 90 ## it means m0/m1=99, m0/(m0+m1)=0.99
+alpha_1 <- power * FDR / (1 + (1 - FDR) * 1)
+alpha_90 <- power * FDR / (1 + (1 - FDR) * 90)
+alpha_50 <- power * FDR / (1 + (1 - FDR) * 50)
+
+
+calc_sample_size <- function(desired_difference,
+                                 alpha,
+                                 power,
+                                 variance_estimate_without_I){
+  delta <- seq(desired_difference[1], desired_difference[2], .1)
+  z_alpha <- qnorm(1-alpha/2)
+  z_beta <- qnorm(power)
+  aa <- (z_alpha+z_beta)
+  denom = (delta/aa)^2
+  #numSample <- round(variance_estimate_without_I/denom, 0)
+  numSample <- variance_estimate_without_I/denom
+  return(data.frame(delta,numSample,FDR,power))
+}
+
+comparison_labels = c("In Osteoarthritis: Medial vs Lateral", "In Medial: Osteoarthritis vs Control")
+
+
+df_curves <- bind_rows(
+  calc_sample_size(c(1,150),
+                              alpha_90,
+                              power,
+                              2*(median.sigma.error + median.sigma.subject)) %>%
+    mutate(id = "Condition", n_sig_test = 90),
+  
+  calc_sample_size(c(1,150),
+                              alpha_90,
+                              power,
+                              2*(median.sigma.error)) %>%
+    mutate(id = "Subsection", n_sig_test = 90),
+  
+  calc_sample_size(c(1,150),
+                              alpha_50,
+                              power,
+                              2*(median.sigma.error + median.sigma.subject)) %>%
+    mutate(id = "Condition", n_sig_test = 50 ),
+  
+  calc_sample_size(c(1,150),
+                              alpha_50,
+                              power,
+                              2*(median.sigma.error)) %>%
+    mutate(id = "Subsection", n_sig_test = 50),
+  calc_sample_size(c(1,150),
+                              alpha_1,
+                              power,
+                              2*(median.sigma.error + median.sigma.subject)) %>%
+    mutate(id = "Condition", n_sig_test = 1 ),
+  
+  calc_sample_size(c(1,150),
+                              alpha_1,
+                              power,
+                              2*(median.sigma.error)) %>%
+    mutate(id = "Subsection", n_sig_test = 1)
+) %>%
+  mutate(comparison = factor(ifelse(id=="Subsection",
+                                    comparison_labels[1],
+                                    comparison_labels[2]),
+                             levels = comparison_labels),
+         n_sig_test = factor(n_sig_test,
+                             levels = c(1, 50, 90),
+                             labels = c("No correction, i.e. a single comparison", 
+                                        "FDR correction, 50% true negative rate", 
+                                        "FDR correction, 90% true negative rate")))
+
+
+# ggplot(df_curves,
+#        aes(x = delta, y = numSample, color = comparison)) + 
+#   geom_line(aes(linetype = n_sig_test), linewidth = 1) +
+#   geom_hline(yintercept = 4, linetype = "dashed", alpha = 0.5) +
+#   scale_linetype_manual(values = c("solid", "31", "11"), 
+#                         name = "Multiple Testing Correction") +
+#   theme_bw() +
+#   ylab("Miminum Number of Subjects") +
+#   xlab("Anticipated Difference of Mean Intensity") +
+#   xlim(0, 40) +
+#   ylim(0, 32) +
+#   labs(color = "Comparison") +
+#   theme(legend.position = "bottom") +
+#   guides(color = guide_legend(order = 1, nrow = 2, theme = theme(legend.title.position = "top")),
+#          linetype = guide_legend(order = 2, nrow = 3, theme = theme(legend.title.position = "top")))
+# 
+# ggsave("sample_size_curves.png", height = 6, width = 6, units = "in")
+
+greys <- c("In Osteoarthritis: Medial vs Lateral" = "grey70", "In Medial: Osteoarthritis vs Control" = "grey30")
+ggplot(df_curves,
+       aes(x = delta/median_denom_for_pct_delta, y = numSample, color = comparison)) + 
+  geom_line(aes(linetype = n_sig_test), linewidth = 0.9) +
+  geom_hline(yintercept = 4,  alpha = 0.5, linewidth = .7) +
+  scale_linetype_manual(values = c("solid", "31", "11"), 
+                        name = "Multiple Testing Correction") +
+  theme_bw() +
+  ylab("Minimum Number of Biological Replicates") +
+  xlab("Absolute Value of Anticipated Percent Difference of Mean Intensities") +
+  #xlim(0, 40) +
+  ylim(0, 20) +
+  labs(color = "Comparison") +
+  theme(legend.position = "bottom") +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0.11,0.5)) +
+  scale_color_manual(values = greys) +
+  guides(color = guide_legend(order = 1, nrow = 2, theme = theme(legend.title.position = "top")),
+         linetype = guide_legend(order = 2, nrow = 3, theme = theme(legend.title.position = "top")))
+
+ggsave(file.path("Recreated-Figures", paste0("Figure-Designing-Future-Experiments-Power.png")), height = 6, width = 6, units = "in")
+
+df_curves %>% 
+  filter(n_sig_test == "FDR correction, 90% true negative rate") %>% 
+  group_by(comparison) %>% 
+  filter(abs(numSample-4) == min(abs(numSample-4))) %>% 
+  mutate(pct_delta = delta/median_denom_for_pct_delta)
+  
+  
+  
+
+
+```

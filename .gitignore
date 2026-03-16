@@ -3,9 +3,10 @@
 .RData
 .Ruserdata
 .Rprofile
+/.vscode
 /renv
 /Data
-/Old
+/OLD
 /super_image*
 MSI_Arthritis_Vignettes.Rproj
 *.html
@@ -13,3 +14,10 @@ MSI_Arthritis_Vignettes.Rproj
 Outputs/super_image_for_mzClustering_algo.txt
 Outputs/super_image_for_DeepION.txt
 Outputs/mz_vector_for_DeepION.txt
+/Archived
+/Arthritis-Project-Preprocessing-Code
+knit_preprocessing.sh
+/QQ-Itx-Sii-Plots
+/Outputs-OLD
+/Recreated-Figures/*.png
+/Arthritis-Project-Preprocessing-Code

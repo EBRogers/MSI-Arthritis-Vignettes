@@ -9,16 +9,52 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-## Dependencies
+## Install R
 
-This workflow requires the following packages and their dependencies:
-- Cardinal 3.6*
-- Tidyverse
-- data.table
-- fuzzyjoin (for feature dimensi)
+This workflow was built with R version 4.5.1. To install R for your computer, follow the directions on the R Project [website](https://www.r-project.org). 
 
+## Clone this workflow to your preferred directory
 
-```{r cars}
+This can be done by downloading the source zip file and unzipping the contents into your preferred directory.
+
+## Run R
+
+Navigate to the directory you added the workflow to above and launch R via command line. In bash or zsh, this can be done with the following commands, substituting `your/preferred/directory` with the directory path.
 
 ```
+cd your/preferred/directory
+R
+```
 
+## Install `renv`, create the virtual environment from the `renv.lock` file, and install dependencies
+
+Now we can begin setting up our workspace and installing dependencies using `renv`. `renv` sets up isolated package libraries called virtual environments similar to python's `venv`. It's best practice to use a dedicated virtual environments for each project. However, in order to set up a virtual environment, we need to first install `renv` on the system library.
+
+```
+install.packages("renv")
+renv::init(bioconductor = TRUE)
+```
+
+This workflow requires the following packages and their dependencies:
+- Cardinal
+- dplyr, tibble, tidyr, and ggplot2
+- data.table
+- fuzzyjoin
+- patchwork, ggpubr
+- lmerTest, nlme
+- emmeans
+
+`renv` will automatically detect the `renv.lock` file in the main directory, which will tell it to install the packages above and their dependencies. To commence this process, run the following:
+
+## Download data from MassIVE
+
+In order to run this workflow, we need to download the dataset raw .imzML files. This workflow is written to look for data in the `./Data` directory in the working directory.
+
+First, create this directory. You can do this in bash or zsh by running this command while in your working directory (the same as the preferred directory from above):
+
+```
+cd your/preferred/directory
+mkdir Data
+```
+
+The original dataset in Bruker .d format can be found on MassIVE via ID number: [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb). The reanalysis container holds all intermediates, including raw .imzML images that will be used for this analysis.

@@ -36,9 +36,7 @@ In practice, statistical software will do this translation using the structure o
 
 ```{r library, results='hide', warning=FALSE, message=FALSE}
 library(tidyverse)
-#library(Cardinal)
-library(devtools)
-load_all("~/OtherProjects/Cardinal")
+library(Cardinal)
 library(lmerTest)
 library(emmeans)
 source("Utilities.R")
@@ -54,6 +52,15 @@ Like statistical modeling, we perform statistical testing in Cardinal, or extern
 
 ```{r load_imzML}
 load("Outputs/meansTest_cartilage_lmer.RData")
+
+model_fit_eval <- read_csv("Outputs/feature-model-fit-evaluation.csv") |> 
+  mutate(across(qq_normality:outliers, as.factor))
+
+passed <- model_fit_eval |> 
+          filter(qq_normality == "OK" & 
+            residual_variance == "OK" & 
+            outliers == "OK" )
+
 ```
 
 ### Run tests
@@ -124,7 +131,8 @@ rbind(results_tibble_h1, results_tibble_h2) |>
 Like in Cardinal, we will test comparisons externally with `emmeans` again, showing multiple ways to specify the same comparison. First lets load the models we fit in the last vignette.
 
 ```{r}
-load(file.path("Outputs","cartilage_lmer_results.RData"))
+load(file.path("Outputs","cartilage_results.RData"))
+
 ```
 
 We will write a function to perform test hypotheses for each model, but first lets experiment with different ways to specify contrasts in `emmeans`, using the second feature model, `r round(mz(all_mse)[2],3)` m/z.
@@ -172,8 +180,11 @@ contrast(emmeans_grid,
 Now, lets write a function to test Hypothesis A and B on all models. This function also extracts the mean estimate for the reference so that we can compute the percent change.
 
 ```{r}
+
+cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
+
 # Run contrasts
-signift_cartilage <- bind_rows(lapply(cartilage_res[[1]], FUN = function(m){
+signift_cartilage <- bind_rows(lapply(cartilage_models_OK_fit, FUN = function(m){
     emmeans_grid <- emmeans(m, ~ condition * tissue, lmer.df = "satterthwaite")
     k <- contrast(emmeans_grid,
          list(control_vs_osteoarthritis_in_medial = c(0, 0, 1, -1),
@@ -184,7 +195,14 @@ signift_cartilage <- bind_rows(lapply(cartilage_res[[1]], FUN = function(m){
                 (condition == "Osteoarthritis" & tissue == "Lateral"))  |> 
                 arrange(desc(tissue)) |> pull(emmean)) |> 
                     mutate(pct_delta = estimate/reference_estimate)
-    }), .id = "feature_id")
+    }), .id = "feature_id") |> 
+  group_by(contrast) |> 
+  mutate(p_value_fdr = p.adjust(p.value, method = "fdr")) |> 
+  ungroup() |> 
+  mutate(signif_after_fdr_adj = p_value_fdr < 0.1) |> 
+  arrange(p.value)
+
+save(signift_cartilage, file = "Outputs/signift_cartilage.RData")
 
 rmarkdown::paged_table(head(signift_cartilage))
 ```
@@ -194,18 +212,36 @@ rmarkdown::paged_table(head(signift_cartilage))
 As above, we will correct for multiple testing using the FDR method and construct a volcano plot. We have also flipped the comparison to harmonize these results with the accompanying journal article (positive difference mean greater abundance in osteoarthritis conditions or medial tissues).
 
 ```{r}
-signift_cartilage |> 
-  group_by(contrast) |> 
-  mutate(p_value_fdr = p.adjust(p.value, method = "fdr")) |> 
-  ungroup() |> 
-  mutate(signif_after_fdr_adj = p_value_fdr < 0.1) |> 
-  arrange(p.value) |> 
-  ggplot(aes(x = -1*pct_delta, y = -log(p.value))) +
-  geom_point(alpha = 0.25) +
-    facet_wrap("contrast") +
-    geom_hline(yintercept = -log(0.01)) +
-    xlab("Estimated Percent Difference") +
-    ylab("-Log(Unadjusted P Value)")
+
+
+signift_cartilage |>
+  ggplot(aes(x = -1 * pct_delta, y = -log10(p.value), color = signif_after_fdr_adj)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_hline(yintercept = -log10(0.01), linetype = "dashed", color = "gray40") +
+  facet_wrap(~contrast, labeller = labeller(contrast = c(
+    "control_vs_osteoarthritis_in_medial" = "OA vs. Control in Medial",
+    "lateral_vs_medial_in_osteoarthritis" = "Medial vs. Lateral in OA"
+  ))) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_color_manual(
+    values = c("TRUE" = "#E41A1C", "FALSE" = "gray50"),
+    labels = c("TRUE" = "Significant", "FALSE" = "Not significant"),
+    name = "FDR-adjusted"
+  ) +
+  labs(
+    x = "Estimated Percent Difference",
+    y = expression(-log[10](italic(P)~value))
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "white", color = "black"),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+  ggsave("Recreated-Figures/Figure-Statistical-Inference-Volcano.png", height = 5.75, width = 6, units = "in")
+
 ```
 
 ## Inspecting the distributions of unadjusted P values for test interdependence
@@ -215,8 +251,60 @@ When performing multiple tests, the distribution of P values can reveal informat
 ```{r}
 signift_cartilage |> 
   ggplot(aes(x = p.value)) +
-  geom_histogram(bins = 50) +
-    facet_wrap("contrast")
+  geom_histogram(bins = 7, fill = "gray50", color = "white", boundary = 0) +
+  facet_wrap(~contrast, labeller = labeller(contrast = c(
+    "control_vs_osteoarthritis_in_medial" = "OA vs. Control in Medial",
+    "lateral_vs_medial_in_osteoarthritis" = "Medial vs. Lateral in OA"
+  ))) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2)) +
+  labs(
+    x = expression(italic(P)~value),
+    y = "Count"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "white", color = "black"),
+    strip.text = element_text(face = "bold")
+  )
+  ggsave("Recreated-Figures/SI-Figure-Statistical-Inference-PValue-Dists.png", height = 5.75, width = 6, units = "in")
 ```
 
 As the distribution of P values is neither uniform or right skewed, there may be some interdependence between tests. This is not surprising as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `qvalue` package.
+
+
+```{r}
+knitr::kable(model_fit_eval |> select(-c(feature_id)), format = "latex", longtable = T, booktabs = T)
+
+
+knitr::kable(model_fit_eval |> select(-c(feature_id)), format = "latex", longtable = T, booktabs = T)
+
+
+knitr::kable(model_fit_eval |> select(-c(feature_id)), format = "latex", longtable = T, booktabs = T)
+
+signift_cartilage |> 
+  filter(contrast == "control_vs_osteoarthritis_in_medial") |>
+  mutate(feature_id = as.integer(feature_id)) |>
+  left_join(passed) |>
+  mutate(mz = round(mz, 3),
+          estimate = round(estimate, 3),
+          SE = round(SE, 3),
+          p.value = round(p.value, 3),
+          p_value_fdr = round(p_value_fdr, 3)) |>
+  select(mz, estimate, SE, p.value, p_value_fdr) |> 
+  arrange(p.value) |>
+  knitr::kable(format = "latex", longtable = T, booktabs = T)
+
+signift_cartilage |> 
+  filter(contrast == "lateral_vs_medial_in_osteoarthritis") |>
+  mutate(feature_id = as.integer(feature_id)) |>
+  left_join(passed) |>
+  mutate(mz = round(mz, 3),
+          estimate = round(estimate, 3),
+          SE = round(SE, 3),
+          p.value = round(p.value, 3),
+          p_value_fdr = round(p_value_fdr, 3)) |>
+  select(mz, estimate, SE, p.value, p_value_fdr) |> 
+  arrange(p.value) |>
+  knitr::kable(format = "latex", longtable = T, booktabs = T)
+```
