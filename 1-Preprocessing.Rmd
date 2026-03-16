@@ -20,7 +20,7 @@ local({
 
 ```
 
-Preprocessing has many functions but overarching goals include reducing nuisance variation, increasing variation of interest (signal) and enabling comparisons between samples. The choices made during preprocessing can significantly impact the results of downstream analyses. Important steps include loading data, peak recalibration, peak picking, peak alignment, region of interest (ROI) selection, and normalization.
+Preprocessing has many functions, but the overarching goals include reducing nuisance variation, increasing variation of interest (signal), and enabling comparisons between samples. The choices made during preprocessing can significantly impact the results of downstream analyses. Important steps include loading data, peak recalibration, peak picking, peak alignment, region of interest (ROI) selection, and normalization.
 
 # Load dependencies
 ```{r load-dependencies}
@@ -34,10 +34,10 @@ RNGkind("L'Ecuyer-CMRG")
 ```
 
 # Data availability
-This dataset is available on MassIVE, under ID number [MSV000094448](https://doi.org/doi:10.25345/C5HQ3S91K), as both the original dataset from [Schurman et al., 2025](https://doi.org/10.1038/s41413-025-00495-0). This work is presented as a reanalysis. Running this workflow starting with the raw files will produce each intermediate. Alternatively, each dataset and all intermediates can be downloaded and placed in the `./Data` directory.
+This dataset is available on MassIVE under ID [MSV000094448](https://doi.org/doi:10.25345/C5HQ3S91K) as the original dataset from [Schurman et al., 2025](https://doi.org/10.1038/s41413-025-00495-0). This work is presented as a reanalysis. Running this workflow starting with the raw files will produce each intermediate. Alternatively, each dataset and all intermediates can be downloaded and placed in the `./Data` directory.
 
 # Load data
-We will load individual images from `./Data/Raw`. Some images need to be flipped (to position cartilage on top, as it would be anatomically). Two images have zones of zero pixel intensity, and must be trimmed. Sometimes images have coordinate dimensions that are redundant - such as the `z` coordinate where all values are 1 for a 2D image. Leaving these coordinates in can cause issues with Cardinal, so we will set them to `NULL`.
+We will load individual images from `./Data/Raw`. Some images need to be flipped (to position cartilage on top, as it would be anatomically). Two images have zones of zero pixel intensity and must be trimmed. Sometimes images have coordinate dimensions that are redundant, such as the `z` coordinate where all values are 1 for a 2D image. Leaving these coordinates in can cause issues with Cardinal, so we will set them to `NULL`.
 
 ```{r load-raw-data}
 DATA_PATH <- file.path("Data", "Raw")
@@ -113,7 +113,7 @@ Powerful computers, especially computers with lots of memory, will benefit most 
 More information detailing how to set parallel defaults and options in Cardinal can be found in the *Cardinal-package* section of the [Cardinal reference manual](https://bioconductor.org/packages/release/bioc/manuals/Cardinal/man/Cardinal.pdf).
 
 # A note about out-of-memory objects and memory management in Cardinal
-Computer memory, more than speed, is the limiting factor for working with MSI datasets. Cardinal v3 addresses these issues using the matter package as its backend. In general, when loading .imzML files, Cardinal leaves memory heavy components (for example, intensity matrices) out-of-memory, instead using a `matter_mat` to provide an "interface" for the data. When data is read, such as during a preprocessing step, the matter matrix streams the data from disk as its needed. This lets us interact with data that would be too large to hold in memory at once. This process will be slower for certain operations, and for computers without solid-state drives. Out-of-memory objects have some limitations. Results of operations, such as recalibration, are by default NOT stored as out-of-memory objects. Consider the following code:
+Computer memory, more than speed, is the limiting factor for working with MSI datasets. Cardinal v3 addresses these issues using the matter package as its backend. In general, when loading .imzML files, Cardinal leaves memory-heavy components (for example, intensity matrices) out-of-memory, instead using a `matter_mat` to provide an "interface" for the data. When data is read, such as during a preprocessing step, the matter matrix streams the data from disk as it is needed. This lets us interact with data that would be too large to hold in memory at once. This process will be slower for certain operations, and for computers without solid-state drives. Out-of-memory objects have some limitations. Results of operations, such as recalibration, are by default NOT stored as out-of-memory objects. Consider the following code:
 
 ```
 mse_recalibrated <- recalibrate(mse, 
@@ -210,7 +210,7 @@ for (f in MSE_FILENAMES_PICKED) {
 }
 ```
 
-Next let us assign metadata to each pixel. This will assist later with modeling and tissue identification. This notation, i.e. `MSimage$var_name <- value` assigns `value` as a column in the `MSimage` `PositonDataFrame` object. Value must be of length 1 (to assign the same value to every pixel) or length n_pixels (to assign a specific value to each pixel).
+Next, let us assign metadata to each pixel. This will assist later with modeling and tissue identification. This notation, i.e. `MSimage$var_name <- value`, assigns `value` as a column in the `MSimage` `PositionDataFrame` object. `value` must be of length 1 (to assign the same value to every pixel) or length n_pixels (to assign a specific value to each pixel).
 
 ```{r}
 for (n in names(mse_list_rp)) {
@@ -221,17 +221,17 @@ for (n in names(mse_list_rp)) {
 }
 ```
 
-This chain conducts multiple steps, and yielding a single `MSImagingExperiment` object containing a run for every sample, all with a shared mass axis.
+This chain conducts multiple steps, yielding a single `MSImagingExperiment` object containing a run for every sample, all with a shared mass axis.
 
 - `combine` groups samples into a single `MSImagingArrays` object.
-- `peakPick` performs peak picking on on all spectra with the same method and signal to noise ration (SNR) across all samples
+- `peakPick` performs peak picking on all spectra with the same method and signal-to-noise ratio (SNR) across all samples
 - `peakAlign` centroids the picked peaks, creating the unified mass axis for all samples. This also converts the `MSImagingArrays` to a `MSImagingExperiment`
 - `process` actually executes the above steps.
 - `summarizeFeatures` summarizes pixel intensities by features. Keep in mind that these summaries are across all values from every sample - now represented as runs in the `MSImagingExperiment` object
 
-The final step, changing the `spectrumRepresentation` ensures that Cardinal write the object to disk as centroided.
+The final step, changing the `spectrumRepresentation`, ensures that Cardinal writes the object to disk as centroided.
 
-After these steps, the resulting combined image will have an orders of magnitude smaller memory footprint, as we are no longer maintaining either separate mass axes for each spectra and non-centroided peaks. The object should easily fit in memory.
+After these steps, the resulting combined image will have an orders-of-magnitude smaller memory footprint, as we are no longer maintaining separate mass axes for each spectrum and non-centroided peaks. The object should easily fit in memory.
 
 ```{r}
 mse_all <- combine(mse_list_rp) |>
@@ -249,7 +249,7 @@ gc()
 experimentData(mse_all)$spectrumRepresentation <- "centroid spectrum"
 ```
 
-Cardinal automatically calculates `freq` during peak picking, but this metric is across all runs. In our workflow we recommend filtering peaks by non-zero frequency on a per run basis. The function below can do this. 
+Cardinal automatically calculates `freq` during peak picking, but this metric is computed across all runs. In our workflow, we recommend filtering peaks by non-zero frequency on a per-run basis. The function below can do this.
 
 ```{r}
 filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
@@ -291,7 +291,7 @@ mse_all_filt <- mse_all |>
 gc()
 ```
 
-Write the uniform, peak picked image to disk. 
+Write the uniform, peak-picked image to disk.
 
 ```{r write-combined}
 writeMSIDataSafe(mse_all_filt,
@@ -300,7 +300,7 @@ writeMSIDataSafe(mse_all_filt,
     "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
 ```
 
-For other steps, it is useful to have each peak picked image separate again.
+For other steps, it is useful to have each peak-picked image separate again.
 
 ```{r write-individual-filtered}
 for (rn in runNames(mse_all_filt)) {
@@ -308,7 +308,7 @@ for (rn in runNames(mse_all_filt)) {
   writeMSIDataSafe(m,
               file.path("Data", 
                 "Preprocessing", 
-                "Individial-Picked-Aligned-Filtered", 
+                "Individual-Picked-Aligned-Filtered", 
                 paste0(rn, ".imzML")))
 }
 gc()
@@ -325,7 +325,7 @@ gc()
 
 # ROI Segmentation
 
- ROIs define the tissue areas relevant to the biological question to be analyzed in later steps. Region of interest (ROI) segmentation can be achieved though many means. Below we present a method that uses predefined marker ions to segment regions of interest. We will use this method to segment cartilage, bone, and background/extracellular matrix (ECM). It is important involve subject matter experts (i.e., pathologists, biologists who know the tissue) in selection of ROI markers and review of segmentation results. Unsupervised multivariate segmentation methods that use all features, although useful for discovery, should not be used to create ROIs when investigating differential abundance as doing go constitutes double dipping and overfits ROIs to biological variation.
+ROIs define the tissue areas relevant to the biological question to be analyzed in later steps. Region of interest (ROI) segmentation can be achieved through many means. Below we present a method that uses predefined marker ions to segment regions of interest. We will use this method to segment cartilage, bone, and background/extracellular matrix (ECM). It is important to involve subject matter experts (i.e., pathologists and biologists who know the tissue) in selection of ROI markers and review of segmentation results. Unsupervised multivariate segmentation methods that use all features, although useful for discovery, should not be used to create ROIs when investigating differential abundance, as doing so constitutes double dipping and overfits ROIs to biological variation.
 
 ## Load required packages
 
@@ -378,7 +378,7 @@ for (f in MSE_FILENAMES) {
 
 ### Visualize segmentation markers
 
-First, lets subset a representative image. We will locate the features with m/z values nearest our approximate values for the representative features.
+First, let's subset a representative image. We will locate the features with m/z values nearest our approximate values for the representative features.
 
 ```{r roi_setup}
 m <- readMSIData(file.path(DATA_PATH, MSE_FILENAMES[1]), verbose=F)
@@ -408,7 +408,7 @@ We chose m/z `r mz(m)[cartilage_feature_ids]` as the cartilage marker, as it acc
 image(m, i = cartilage_feature_ids, key = F)
 ```
 
-There were seven m/z values indicative of background/ECM m/z: `r mz(m)[background_feature_ids]`
+There were seven m/z values indicative of background/ECM: `r mz(m)[background_feature_ids]`
 
 -   M/z `r mz(m)[background_feature_ids[1:3]]` are Glufib and +1, +2, and +3 isotopes/H adducts.
 
@@ -476,7 +476,7 @@ background_and_bone_features <- Cardinal::subset(m,
                                                  cartilage_vector=="other")
 ```
 
-Unlike cartilage, we have selected six features for background/ECM segmentation. Instead of segmentation each individually, we will first combine them into a single feature by using the pixel-wise mean. `condense_groups` (supplied from `Utilities.R`) uses the `group_ids` assigned by `grouping_df` to combine features into groups. The `agg_fun="mean"` specifies we want to combine groups via the pixel-wise mean.
+Unlike cartilage, we have selected six features for background/ECM segmentation. Instead of segmenting each individually, we will first combine them into a single feature by using the pixel-wise mean. `condense_groups` (supplied from `Utilities.R`) uses the `group_ids` assigned by `grouping_df` to combine features into groups. The `agg_fun="mean"` specifies we want to combine groups via the pixel-wise mean.
 
 ```{r combine_background_features}
 grouping_df <- tibble(feature_id = 1:length(mz(background_and_bone_features)),
@@ -551,7 +551,7 @@ image(m, "tissue_zone")
 
 ## Segment all samples
 
-Now we will repeat this procedure on all samples, saving the ROI labels in a names list and a dataframe for visualization.
+Now we will repeat this procedure on all samples, saving the ROI labels in a named list and a data frame for visualization.
 
 ```{r}
 bp <- SnowfastParam(workers = 15L, force.GC = TRUE)
@@ -811,7 +811,7 @@ ggsave(file.path("Recreated-Figures",
 rm(m, sdgmm, 
   hc_class_plotting_frame, 
   background_and_bone_features, 
-  artilage_features, mse_list_pp, 
+  cartilage_features, mse_list_pp, 
   background_and_bone_features_condensed)
 gc()
 ```
@@ -859,14 +859,14 @@ m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx])
 
 ## A note on sparsity
 
-Sparsity of pixels and features is ubiquitous in MSI. In MSI, Sparsity in MSI is generally a mix of concepts - zero intensity, intensity past the limit of detection, and missing values. Although each is subtly different, they are all highly interlinked concepts due to the nature of mass spectrometry. In practice, they are all the same concept. Unfortunately, these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries downwards, especially means. Missing values are often dropped, meaning that summaries are biased upwards towards non-missing values. There is no good way around this predicament, other than to reduce sparsity but defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
+Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mix of concepts: zero intensity, intensity below the limit of detection, and missing values. Although each is subtly different, they are highly interlinked due to the nature of mass spectrometry. In practice, they behave similarly, but these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries downwards, especially means. Missing values are often dropped, meaning that summaries are biased upwards towards non-missing values. There is no good way around this predicament other than to reduce sparsity by defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
 
 
 ## Preparing spectra for median normalization
 
-In our testing, we found median normalization was less biased by outliers than TIC normalization. The trade off is that TIC normalization is *slightly* more robust to sparsity. Median normalization is simple - compute the median intensity for each spectra (pixel) then scale each pixel by that median. Although simple, this still presents issues. If the median of a spectrum is zero, then the scaled intensity becomes undefined. If we replace zeros with missing values, then recompute the median dropping missing values, the median will be biased larger. There is no easy answer. For this analysis, we chose to replace zeros with NA values, as leaving zeros in would result in zero-inflation of mean abundance at the time of statistical modeling. Zero inflation breaks the assumption that residual values are normally distributed. 
+In our testing, we found median normalization was less biased by outliers than TIC normalization. The trade-off is that TIC normalization is *slightly* more robust to sparsity. Median normalization is simple: compute the median intensity for each spectrum (pixel), then scale each pixel by that median. Although simple, this still presents issues. If the median of a spectrum is zero, then the scaled intensity becomes undefined. If we replace zeros with missing values, then recompute the median dropping missing values, the median will be biased larger. There is no easy answer. For this analysis, we chose to replace zeros with NA values, as leaving zeros in would result in zero-inflation of mean abundance at the time of statistical modeling. Zero inflation breaks the assumption that residual values are normally distributed.
 
-Even still, we found that median normalization will still highly biased by outliers. True outliers are rare, but can be of very high magnitude. We chose to clip medians at the 95th percentile to control outliers. These steps are performed in the chunk below using matter's `addProcessing` function to queue steps for parallel processing.
+Even still, we found that median normalization can be highly biased by outliers. True outliers are rare, but can be of very high magnitude. We chose to clip medians at the 95th percentile to control outliers. These steps are performed in the chunk below using matter's `addProcessing` function to queue steps for parallel processing.
 
 
 ```{r apply-na}
@@ -898,7 +898,7 @@ mse <- m |>
 
 ```
 
-We also compute the global median (the median of medians, accross all specta in all runs) to use as a final scaling constant. The final constant can be anything, so we chose this value to remain representitve. 
+We also compute the global median (the median of medians, across all spectra in all runs) to use as a final scaling constant. The final constant can be anything, so we chose this value to remain representative.
 
 ```{r compute-median-by-pixel}
 pData(mse)$median <- Cardinal::spectrapply(
@@ -939,7 +939,7 @@ scale_by_median <- function(x, mz, scaling_constant, na.rm = TRUE) {
 
 ```
 
-We now apply normalization. Cardinal does not have a native implemenbtation of median normalization, thus we created our own. As the data are centroided and peak picked, they easly fit in memory. 
+We now apply normalization. Cardinal does not have a native implementation of median normalization, thus we created our own. As the data are centroided and peak picked, they easily fit in memory.
 
 ```{r apply-normalization}
 normalized <- mse |>
@@ -955,7 +955,7 @@ normalized <- normalized |>
     na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
 ```
 
-Finally, save the nromalized dataset.
+Finally, save the normalized dataset.
 
 ```{r write-normalized-output}
 writeMSIDataSafe(normalized, file.path("Data",
