@@ -21,4 +21,4 @@ knit_preprocessing.sh
 /Outputs-OLD
 /Recreated-Figures/*.png
 /Arthritis-Project-Preprocessing-Code
-renv.lock
+renv.lockSimulation-Data/sim_list_original.RData
