@@ -73,9 +73,9 @@ mse <- subsetPixels(mse, tissue_zone == "cartilage")
 
 
 
-We are ready to fit the models. The fixed effects are specified in the second argument. `condition * tissue` is shorthand for `condition + tissue + condition:tissue`, which includes the main effects and their interaction. The random effects are specified in the third argument. `~ 1|subject` indicates that we want a random intercept for each subject. Specification of random effects for `lmer` can be found [here](https://cran.r-project.org/web/packages/lme4/vignettes/lmer.pdf). For compatability with previous versions of Cardinal and `nlme::lme()`, the fixed and random effects are separated. The `samples` argument specifies which the variable that delineates which pixels are included in each sample or experimental unit.
+We are ready to fit the models. The fixed effects are specified in the second argument. `condition * tissue` is shorthand for `condition + tissue + condition:tissue`, which includes the main effects and their interaction. The random effects are specified in the third argument. `~ 1|subject` indicates that we want a random intercept for each subject. Specification of random effects for `lmer` can be found [here](https://cran.r-project.org/web/packages/lme4/vignettes/lmer.pdf). For compatibility with previous versions of Cardinal and `nlme::lme()`, the fixed and random effects are separated. The `samples` argument specifies the variable that delineates which pixels are included in each sample or experimental unit.
 
-For mixed effects model, we can run meansTest using the default implementation, `nlme::lme()`, or specify `lme4::lmer()` using `use_lmer=TRUE` for newer Cardinal releases. When modeling basic random effects structures, both implementations are equivalent. `lme4::lmer()` extended via `lmerTest` enables use fo the satterhwaite approximation for caluclating degrees of freedom.
+For mixed effects models, we can run meansTest using the default implementation, `nlme::lme()`, or specify `lme4::lmer()` using `use_lmer=TRUE` for newer Cardinal releases. When modeling basic random effects structures, both implementations are equivalent. `lme4::lmer()` extended via `lmerTest` enables use of the Satterthwaite approximation for calculating degrees of freedom.
 
 ### Modeling with `nlme::lme()` in Cardinal
 
@@ -94,7 +94,7 @@ lmer_means_test <- meansTest(mse, ~ condition * tissue, ~ 1|subject,
 lmer_means_test
 ```
 
-Note the `singular` column - Cardinal automatically reports singularity for `lme4::lmer()` models. Models can be singular for many reasons, in our case, this is likely due to low biological variance relative to technical variance. More on this later. If we print the results, we can see information about the models. In Cardinal, models fit with `lme4::lmer()` (via `use_lmer=TRUE`) use restricted maximum likihood estimation. meansTesting with `nlme::lme()`in Cardinal elects to use maximum liklihood estiamation to be comaptible with likelihood-ratio tests.
+Note the `singular` column - Cardinal automatically reports singularity for `lme4::lmer()` models. Models can be singular for many reasons; in our case, this is likely due to low biological variance relative to technical variance. More on this later. If we print the results, we can see information about the models. In Cardinal, models fit with `lme4::lmer()` (via `use_lmer=TRUE`) use restricted maximum likelihood estimation. meansTesting with `nlme::lme()` in Cardinal elects to use maximum likelihood estimation to be compatible with likelihood-ratio tests.
 
 Note: `meansTest` does not support likelihood-ratio tests for `lme4::lmer()` models, so the `statistic` and `pvalue` columns in the output will be `NA`.
 
@@ -107,7 +107,7 @@ save(lmer_means_test, file = "Outputs/meansTest_cartilage_lmer.RData")
 
 ## Method 2: Modeling externally with `lmer`
 
-ALternativly, we can extract the data from the MSE objects and run the models ourselves. This allows for greater flexibility than using `Cardinal::meansTest`.
+Alternatively, we can extract the data from the MSE objects and run the models ourselves. This allows for greater flexibility than using `Cardinal::meansTest`.
 
 First, let us create a helper function to run the models and extract the results tidily. In addition, we will calculate the intraclass correlation coefficient (ICC) for each model - a measure the breakdown between residual and within-subject variance, with greater values (\>0.5) indicating more within-subject variance than residual variance. We will also extract whether the model is singular and the convergence code. Our function will return three objects: a list of models, a wide tibble of model results, and a long tibble of model results that is better suited for plotting.
 
@@ -144,7 +144,7 @@ model_and_extract <- function(mse_frame, form) {
 }
 ```
 
-Now lets summarize the pixel means per sample by region of interest (ROI).
+Now let's summarize the pixel means per sample by region of interest (ROI).
 
 ```{r}
 # Summarize pixel means per sample by ROI
@@ -197,7 +197,7 @@ save(cartilage_res, file = "Outputs/cartilage_results.RData")
 rmarkdown::paged_table(head(cartilage_res[[2]]))
 ```
 
-As above, many of the model are singular. Lets explore the ICC values of these models.
+As above, many of the models are singular. Let's explore the ICC values of these models.
 
 ```{r}
 knitr::kable(cartilage_res[[2]] |> 
@@ -208,7 +208,7 @@ As we can see, most of the singular models have ICC values near zero (less than 
 
 # Evaluating Model Assumptions
 
-Linear mixed effects models make several assumptions that must be checked to ensure statistical validity. There are many ways to express these assumptions but in general they are that random effects and residuals independent, are normally distributed, and have constant variance. We can assess these assumptions with residual quantile-quantile (QQ) plots.
+Linear mixed effects models make several assumptions that must be checked to ensure statistical validity. There are many ways to express these assumptions, but in general they are that random effects and residuals are independent, are normally distributed, and have constant variance. We can assess these assumptions with residual quantile-quantile (QQ) plots.
 
 Simple QQ plots can be generated with the following base R functions.
 
@@ -217,7 +217,7 @@ qqnorm(resid(cartilage_res[[1]][[1]]), main = "Q-Q Plot of Residuals")
 qqline(resid(cartilage_res[[1]][[1]]), col = "red")
 ```
 
-We will generate more infomative qq plots. This code creates a tibble of residuals and fitted values from each model.
+We will generate more informative QQ plots, as well as some other diagnostic plots. This code creates a tibble of residuals and fitted values from each model.
 
 ```{r}
 qq_plot_frame <- NULL
@@ -233,7 +233,7 @@ for (fid in names(cartilage_res[[1]])) {
 } 
 ```
 
-Then we can compute theoretical normal quantiles.
+Then we can compute theoretical normal quantiles for each model.
 ```{r}
 qq_plot_frame <-
   qq_plot_frame |>
@@ -260,8 +260,7 @@ levels = c("Medial","Lateral"))
 fids <- unique(qq_plot_frame$feature_id)
 ```
 
-
-Additioanlly, lets generate interaction plots that will help us see the signal and effect being modeled.
+Let's generate interaction plots that will help us see the signal and effect being modeled.
 
 ```{r}
 manage_directory("QQ-Itx-SII-Plots")
@@ -398,7 +397,7 @@ itx_fancy <- function(tmp_df){
 }
 ```
 
-This code will generate a plot for every model, saving them in `./QQ-Itx-SII-Plots` directory.
+This code will generate a set of plots for every model, saving them in the `./QQ-Itx-SII-Plots` directory.
 ```{r}
 for (f in fids) {
 
@@ -507,7 +506,21 @@ if (round(unique(tmp_df$mz)[1], 2) == 1438.66) {
 }
 ```
 
-QQ plots
+Let's take a look at the last one:
+
+```{r}
+ggarr
+```
+
+Each plot can offer us some understanding of the fit of the model to our data.
+
+A. QQ plot
+B. Interaction plot
+C. Single ion images of each sample
+D. Residual variance boxplots by independent variable
+
+To demonstrate common QQ plot shapes, and especially, what is considered "Normal" with only 16 samples, we can simulate plots below.
+
 ```{r}
 set.seed(2025)
 
@@ -542,8 +555,11 @@ ggplot(df, aes(sample = sample)) +
        y = "Residual Quantiles")
 
 ggsave("Recreated-Figures/SI-Figure-Statistical-Modeling-QQ-Examples.png", width = 8, height = 4)
+```
 
-#---------------------------
+Let us also look at Normality when we only have 8 biological replicates. Our models assume that the distribution of random effects is normal overall, and within each experimental variable. (In this example, we only have condition.)
+
+```{r}
 
 set.seed(2025)
 
@@ -580,3 +596,5 @@ ggsave("Recreated-Figures/SI-Figure-Statistical-Modeling-Constant-Variance.png",
 
 ```
 
+As we can see, it is generally simple to diagnose serious deviations from model assumptions. However, even when we sample data from an empirically normal distribution, small sample size and expected variation can inject uncertainty.
+Additionally, Normality is subjective. If we operate with the understanding that all sampled data have some variation and that model fit is not dichotomously good or bad, but a continuous spectrum from well fit to poorly fit, then we can say that so long as deviations are not serious, we can rely on the robustness of linear models to handle small departures from the model's assumptions.
