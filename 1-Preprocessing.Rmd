@@ -31,6 +31,8 @@ library(Cardinal)
 source("Utilities.R")
 
 RNGkind("L'Ecuyer-CMRG")
+
+setCardinalVerbose(verbose = FALSE)
 ```
 
 # Data availability
@@ -432,7 +434,7 @@ cartilage_features <- m[cartilage_feature_ids,]
 
 Spatial-Dirichlet Gaussian mixture models (sDGMM) [(Guo et al. 2019)](https://doi.org/10.1093/bioinformatics/btz345) is an open-source, unsupervised clustering algorithm that groups pixels in single ion images into $k$ prespecified clusters using pixel intensity and spatial dependence of neighboring pixels. sDGMM is technically unsupervised but acts only on single features, facilitating a higher degree of control and replicability. We will use adaptive weights to better define segment edges.
 
-Choosing the number of clusters is one way to affect a finer level of control over what sDGMM segments. In our testing we found six clusters, ordered by mean intensity with the first three assigned as cartilage, to yield the most consistent results across samples.
+Choosing the number of clusters is one way to affect a finer level of control over what sDGMM segments. In our testing we found 5 clusters, ordered by mean intensity with the first three assigned as cartilage, to yield the most consistent results across samples.
 
 ```{r segment_cartilage_features}
 set.seed(12345)
@@ -452,13 +454,13 @@ cartilage_vector <- case_match(as.character(sdgmm$class[[1]]),
 pData(cartilage_features)$class <- cartilage_vector
 ```
 
-Visualizing the six clusters, we can see that in this case segmenting more clusters gave finer control over cartilage boundaries.
+Visualizing the 5 clusters, we can see that in this case segmenting more clusters gave finer control over cartilage boundaries.
 
 ```{r vis_cartilage_sdgmm}
 image(sdgmm)
 ```
 
-After collapsing the six segments into only two.
+After collapsing the 5 segments into only two.
 
 ```{r vis_cartilage_class}
 image(cartilage_features, "class")
@@ -964,7 +966,7 @@ writeMSIDataSafe(normalized, file.path("Data",
 ```
 
 Below creates figures from the paper.
-```{r fig-peakpicking-b, results='hide', warning=FALSE, message=FALSE, echo=FALSE}
+```{r fig-peakpicking-b, results='hide', warning=FALSE, message=FALSE}
 png(filename = file.path("Recreated-Figures", 
       "Figure-Peakpicking-Preprocessed.png"), 
     height = 500, width = 600, pointsize = 20)
