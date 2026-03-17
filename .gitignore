@@ -11,8 +11,8 @@
 MSI_Arthritis_Vignettes.Rproj
 *.html
 *.DS_Store
-Outputs/super_image_for_mzClustering_algo.txt
-Outputs/super_image_for_DeepION.txt
+Outputs/super_image_708_for_mzClustering.txt
+Outputs/super_image_708_for_DeepION.txt
 Outputs/mz_vector_for_DeepION.txt
 /Archived
 /Arthritis-Project-Preprocessing-Code
@@ -21,3 +21,4 @@ knit_preprocessing.sh
 /Outputs-OLD
 /Recreated-Figures/*.png
 /Arthritis-Project-Preprocessing-Code
+renv.lock

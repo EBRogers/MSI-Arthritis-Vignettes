@@ -38,6 +38,8 @@ zero_to_na <- function(x, mz) {
   x[x == 0] <- NA_real_
   x
 }
+
+setCardinalVerbose(verbose = FALSE)
 ```
 
 ## Find peak-picked and normalized imzML files
@@ -340,13 +342,6 @@ mse_cartilage <- summarizeFeatures(mse_cartilage,
                                   verbose = F)
 
 mse_cartilage_filt <- filterFeaturesByRunFreq(mse_cartilage, 0.25)
-
-as_tibble(pData(mse_cartilage)) |> count(run)
-
-as_tibble(fData(mse_cartilage)) |>
-  mutate(keep = mz %in% mz(mse_cartilage_filt)) |>
-  ggplot(aes(x = mean, y = sd, color = keep)) +
-  geom_point() 
 ```
 
 
