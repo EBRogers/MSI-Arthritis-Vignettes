@@ -37,6 +37,16 @@ zero_to_na <- function(x, mz) {
   x[x == 0] <- NA_real_
   x
 }
+
+bp_param <- function(workers) {
+  if (interactive()) {
+    SnowfastParam(workers = as.integer(workers), force.GC = TRUE)
+  } else {
+    NULL
+  }
+}
+
+setCardinalVerbose(verbose = FALSE)
 ```
 
 ## Load peak-picked, normalized, aggregated data
@@ -47,7 +57,7 @@ mse <- readMSIData(DATA_PATH)
 
 mse <- mse |>
       addProcessing(zero_to_na, label="zero_to_na_before_modeling") |>
-      process(spectra="intensity", index="mz", BPPARAM = SnowfastParam(workers = 3L, force.GC = T))
+  process(spectra="intensity", index="mz", BPPARAM = bp_param(3L))
 ```
 
 
@@ -59,7 +69,7 @@ Models are specified based on the experimental design. In our case, we have two 
 
 Cardinal offers statistical modeling via `meansTest`. Under the hood, `meansTest` uses `lme4::lmer` to fit models with random effects and `stats::lm` for models without. `meansTest` requires a few steps to prepare the dataset for modeling.
 
-To confine statistical testing to the region of interest, we will subset the pixels to only those in the cartilage. This is the longest step and may take a couple minutes.
+To confine statistical testing to the region of interest, we will subset the pixels to only those in the cartilage. This is the longest step and may take a couple of minutes.
 
 ```{r}
 pData(mse)$subject <- as.factor(pData(mse)$subject)
@@ -80,7 +90,7 @@ For mixed effects models, we can run meansTest using the default implementation,
 ### Modeling with `nlme::lme()` in Cardinal
 
 ```{r}
-nlme_means_test <- meansTest(mse, ~ condition * tissue, ~ 1|subject, samples = run(mse))
+nlme_means_test <- meansTest(mse, ~ condition * tissue, ~ 1|subject, samples = run(mse), na.rm = T)
 nlme_means_test
 ```
 
@@ -89,12 +99,16 @@ Note the P-value column. This is a P value for a [likelihood-ratio test](https:/
 ### Modeling with `lme4::lmer()` in Cardinal
 
 ```{r, max.height='150px'}
-lmer_means_test <- meansTest(mse, ~ condition * tissue, ~ 1|subject, 
-                             samples = run(mse), use_lmer = TRUE)
+lmer_means_test <- meansTest(
+  mse, ~ condition * tissue, ~ 1 | subject,
+  samples = run(mse),
+  na.rm = TRUE,
+  use_lmer = TRUE)
+
 lmer_means_test
 ```
 
-Note the `singular` column - Cardinal automatically reports singularity for `lme4::lmer()` models. Models can be singular for many reasons; in our case, this is likely due to low biological variance relative to technical variance. More on this later. If we print the results, we can see information about the models. In Cardinal, models fit with `lme4::lmer()` (via `use_lmer=TRUE`) use restricted maximum likelihood estimation. meansTesting with `nlme::lme()` in Cardinal elects to use maximum likelihood estimation to be compatible with likelihood-ratio tests.
+Note the `singular` column - Cardinal automatically reports singularity for `lme4::lmer()` models. Models can be singular for many reasons; in our case, this is likely due to low biological variance relative to technical variance. More on this later. If we print the results, we can see information about the models. In Cardinal, models fit with `lme4::lmer()` (via `use_lmer=TRUE`) use restricted maximum likelihood estimation. Means testing with `nlme::lme()` in Cardinal uses maximum likelihood estimation to be compatible with likelihood-ratio tests.
 
 Note: `meansTest` does not support likelihood-ratio tests for `lme4::lmer()` models, so the `statistic` and `pvalue` columns in the output will be `NA`.
 
@@ -109,7 +123,7 @@ save(lmer_means_test, file = "Outputs/meansTest_cartilage_lmer.RData")
 
 Alternatively, we can extract the data from the MSE objects and run the models ourselves. This allows for greater flexibility than using `Cardinal::meansTest`.
 
-First, let us create a helper function to run the models and extract the results tidily. In addition, we will calculate the intraclass correlation coefficient (ICC) for each model - a measure the breakdown between residual and within-subject variance, with greater values (\>0.5) indicating more within-subject variance than residual variance. We will also extract whether the model is singular and the convergence code. Our function will return three objects: a list of models, a wide tibble of model results, and a long tibble of model results that is better suited for plotting.
+First, let us create a helper function to run the models and extract the results tidily. In addition, we will calculate the intraclass correlation coefficient (ICC) for each model - a measure of the breakdown between within-subject and residual variance, with greater values (> 0.5) indicating more within-subject variance than residual variance. We will also extract whether the model is singular and the convergence code. Our function will return three objects: a list of models, a wide tibble of model results, and a long tibble of model results that is better suited for plotting.
 
 ```{r}
 # Helper function to model and catch errors
@@ -162,7 +176,7 @@ mse <- summarizeFeatures(mse,
 
 ```
 
-Next, we will extract the feature data from the MSE objects (roughly, a dataframe of each samples' mean feature intensity by ROI) and add the experimental variables to create a modeling dataframe. It is important to ensure that the sample IDs in the dataframe match those in the MSE objects, and that the experimental variables are factors. The models will still run if the variables are numeric, but it will treat them as continuous variables rather than categorical variables, which have different interpretations.
+Next, we will extract the feature data from the MSE objects (roughly, a data frame of each sample's mean feature intensity by ROI) and add the experimental variables to create a modeling data frame. It is important to ensure that the sample IDs in the data frame match those in the MSE objects, and that the experimental variables are factors. The models will still run if the variables are numeric, but they will treat them as continuous variables rather than categorical variables, which have different interpretations.
 
 ```{r}
 # Extract means for modeling and specify experimental vars
@@ -188,7 +202,7 @@ rmarkdown::paged_table(head(mse_frame))
 Now we can run the models, using the same formula as before. `Cardinal::meansTest` separates fixed and random effects as separate arguments. `lme4::lmer` combines them. We will also save the models and results. We can access a wide table of results with `cartilage_res[[2]]` and a list of models with `cartilage_res[[1]]`.
 
 
-```{r, max.height='150px'}
+```{r, message=FALSE, warning=FALSE, results=FALSE }
 cartilage_res <- model_and_extract(mse_frame, "cartilage.mean ~ condition * tissue + (1|subject)")
 ```
 ```{r}
@@ -267,7 +281,7 @@ manage_directory("QQ-Itx-SII-Plots")
 
 m <- readMSIData(DATA_PATH) |>
       addProcessing(zero_to_na, label="zero_to_na_before_modeling") |>
-      process(spectra="intensity", index="mz", BPPARAM = SnowfastParam(workers = 8L, force.GC = T)) 
+  process(spectra="intensity", index="mz", BPPARAM = bp_param(8L)) 
 
 feature_ids <- fids
 selected_mz <- fData(m)[feature_ids, , drop = FALSE]
@@ -508,20 +522,20 @@ if (round(unique(tmp_df$mz)[1], 2) == 1438.66) {
 
 Let's take a look at the last one:
 
-```{r}
+```{r, fig.width=11, fig.height=9}
 ggarr
 ```
 
 Each plot can offer us some understanding of the fit of the model to our data.
 
-A. QQ plot
-B. Interaction plot
-C. Single ion images of each sample
-D. Residual variance boxplots by independent variable
+(A) **QQ plot:** Shows clear signs of departure from normality at both tails. Also note the bifurcation of color, indicating that the control samples have far less variance.
+(B) **Interaction plot:** We can see that the control samples have low variance, and seem to follow a similar increasing pattern from Medial to Lateral. This is not the case with the OA samples.
+(C) **Single ion images of each sample:** We can observe generally high sparsity, and low overall intensity. Some samples are very sparse.
+(D) **Residual variance boxplots by independent variable:** Both show signs of unequal variance, especially between conditions.
 
 To demonstrate common QQ plot shapes, and especially, what is considered "Normal" with only 16 samples, we can simulate plots below.
 
-```{r}
+```{r, fig.width=8}
 set.seed(2025)
 
 n <- 16
@@ -539,13 +553,13 @@ qq_data <- function(x) {
 }
 
 df <- bind_rows(
-  qq_data(normal) |> mutate(scenario = "Example of acceptable fit: Normal"),
-  qq_data(exp_dist) |> mutate(scenario = "Example of poor fit: Right-skewed"),
-  qq_data(log2(exp_dist)) |> mutate(scenario = "Example of acceptable fit: Right-skewed\nafter log transformation")
+  qq_data(normal) |> mutate(scenario = "QQ plot from Normally distributed data"),
+  qq_data(exp_dist) |> mutate(scenario = "QQ plot from Right-skewed data"),
+  qq_data(log2(exp_dist)) |> mutate(scenario = "QQ plot from Right-skewed data\nafter log transformation")
 ) |> 
-  mutate(scenario = factor(scenario, levels = c("Example of acceptable fit: Normal",
-                                      "Example of poor fit: Right-skewed",
-                                      "Example of acceptable fit: Right-skewed\nafter log transformation")))
+  mutate(scenario = factor(scenario, levels = c("QQ plot from Normally distributed data",
+                                      "QQ plot from Right-skewed data",
+                                      "QQ plot from Right-skewed data\nafter log transformation")))
 
 ggplot(df, aes(sample = sample)) +
   stat_qq() +
@@ -559,7 +573,7 @@ ggsave("Recreated-Figures/SI-Figure-Statistical-Modeling-QQ-Examples.png", width
 
 Let us also look at Normality when we only have 8 biological replicates. Our models assume that the distribution of random effects is normal overall, and within each experimental variable. (In this example, we only have condition.)
 
-```{r}
+```{r, fig.width=8}
 
 set.seed(2025)
 
@@ -596,5 +610,5 @@ ggsave("Recreated-Figures/SI-Figure-Statistical-Modeling-Constant-Variance.png",
 
 ```
 
-As we can see, it is generally simple to diagnose serious deviations from model assumptions. However, even when we sample data from an empirically normal distribution, small sample size and expected variation can inject uncertainty.
+As we can see, it is generally simple to diagnose serious deviations from model assumptions. However, even when we sample data from an empirically normal distribution, small sample size and expected variation can inject uncertainty and abnormality.
 Additionally, Normality is subjective. If we operate with the understanding that all sampled data have some variation and that model fit is not dichotomously good or bad, but a continuous spectrum from well fit to poorly fit, then we can say that so long as deviations are not serious, we can rely on the robustness of linear models to handle small departures from the model's assumptions.
