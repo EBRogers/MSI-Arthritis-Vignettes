@@ -68,15 +68,15 @@ scale_row_sd_mean_subset <- function(matrix,
 
 
 
-run_models_no_me <- function(mse_frame, formu = "mean ~ condition" ) {
+run_models_no_me <- function(mse_frame, formu = "mean ~ condition", verbose = FALSE) {
   out <- list()
   model_results <-NULL
   models <- list()
   for (f in unique(mse_frame$feature_id)) {
-    print(paste0("Feature ",f))
+    if (verbose) print(paste0("Feature ",f))
     if (inherits(mse_frame, "data.table")) {
       # Filter using data.table syntax
-      print("using dt filtering")
+      if (verbose) print("using dt filtering")
       data <- mse_frame[feature_id == f]
     } else {
       # Filter using dplyr syntax for tibble/data.frame
@@ -157,7 +157,7 @@ analyze_spatial_clusters <- function(sscl,
                                      samples, 
                                      n_top_per_condition = 4,
                                      n_top_features = 20,
-                                     output_dir = "ssc_selected_clusters") {
+                                     output_dir = FALSE) {
   #' Analyze spatial shrunken centroids clustering results
   #'
   #' @param sscl List of spatialShrunkenCentroids objects from Cardinal package
@@ -188,8 +188,9 @@ analyze_spatial_clusters <- function(sscl,
   }
   
   # Set up output directory
+  if (output_dir != FALSE) {
   manage_directory(output_dir)
-  
+  }
   # Process selected clusters
   sim_to_test <- list()
   samples_to_test <- NULL
@@ -198,9 +199,11 @@ analyze_spatial_clusters <- function(sscl,
   
   for (sc in selected_clusters) {
     # Save cluster image
+    if (output_dir != FALSE) {
     png(filename = paste0(output_dir, "/", sc[[1]], "_", sc[[2]], "_", sc[[3]], "_ssc.png"))
     print(image(sscl[[sc$sim_adj_id]][[sc$ssc_index]], "class"))
     dev.off()
+    }
     
     # Add ROI classification to pData
     pData(sim_list_adj[[sc$sim_adj_id]])$roi_ssc <- ifelse(sscl[[sc$sim_adj_id]][[sc$ssc_index]]$class == as.character(sc$roi_cluster_id),
@@ -225,9 +228,11 @@ analyze_spatial_clusters <- function(sscl,
     i <- i + 1
     
     # Save image classification
+    if (output_dir != FALSE) {
     png(filename = paste0(output_dir, "/", sc[[1]], "_", sc[[2]], "_", sc[[3]], "_imageclass.png"))
     print(image(sim_list_adj[[sc$sim_adj_id]], "roi_ssc"))
     dev.off()
+    }
   }
   
   # Return all results as a list
@@ -244,7 +249,7 @@ analyze_spatial_clusters_skm <- function(skml,
                                      samples, 
                                      n_top_per_condition = 4,
                                      n_top_features = 20,
-                                     output_dir = "skm_selected_clusters") {
+                                     output_dir = FALSE) {
   #' Analyze spatial shrunken centroids clustering results
   #'
   #' @param skml List of spatialKMeans objects from Cardinal package
@@ -274,7 +279,9 @@ analyze_spatial_clusters_skm <- function(skml,
   }
   
   # Set up output directory
+  if (output_dir != FALSE) {
   manage_directory(output_dir)
+  }
   
   # Process selected clusters
   sim_to_test <- list()
@@ -284,9 +291,12 @@ analyze_spatial_clusters_skm <- function(skml,
   
   for (sc in selected_clusters) {
     # Save cluster image
-    png(filename = paste0(output_dir, "/", sc[[1]], "_", sc[[2]], "_ssc.png"))
-    print(image(skml[[sc$sim_adj_id]], "cluster"))
-    dev.off()
+    if (output_dir != FALSE) {
+      png(filename = paste0(output_dir, "/", sc[[1]], "_", sc[[2]], "_ssc.png"))
+      print(image(skml[[sc$sim_adj_id]], "cluster"))
+      dev.off()
+    }
+   
     
     # Add ROI classification to pData
     pData(sim_list_adj[[sc$sim_adj_id]])$roi_skm <- ifelse(as.integer(skml[[sc$sim_adj_id]]$cluster) == as.integer(sc$roi_cluster_id),
@@ -311,9 +321,11 @@ analyze_spatial_clusters_skm <- function(skml,
     i <- i + 1
     
     # Save image classification
-    png(filename = paste0(output_dir, "/", sc[[1]], "_", sc[[2]], "_imageclass.png"))
-    print(image(sim_list_adj[[sc$sim_adj_id]], "roi_skm"))
-    dev.off()
+    if (output_dir != FALSE) {
+      png(filename = paste0(output_dir, "/", sc[[1]], "_", sc[[2]], "_imageclass.png"))
+      print(image(sim_list_adj[[sc$sim_adj_id]], "roi_skm"))
+      dev.off()
+    }
   }
   
   # Return all results as a list
@@ -390,15 +402,15 @@ scale_row_sd_mean <- function(matrix, target_sd = 90, target_mean = NULL, verbos
 
 
 
-run_models <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|subject)" ) {
+run_models <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|subject)", verbose = FALSE ) {
   out <- list()
   model_results <-NULL
   models <- list()
   for (f in unique(mse_frame$feature_id)) {
-    print(paste0("Feature ",f))
+    if (verbose) print(paste0("Feature ",f))
     if (inherits(mse_frame, "data.table")) {
       # Filter using data.table syntax
-      print("using dt filtering")
+      if (verbose) print("using dt filtering")
       data <- mse_frame[feature_id == f]
     } else {
       # Filter using dplyr syntax for tibble/data.frame
@@ -447,7 +459,7 @@ run_models <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|sub
   
 }
 
-run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|subject)", batch_size = 50) {
+run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|subject)", batch_size = 50, verbose = FALSE) {
   out <- list()
   model_results <- NULL
   models <- list()
@@ -463,11 +475,13 @@ run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * subtiss
     end_idx <- min(batch * batch_size, total_features)
     batch_features <- features[start_idx:end_idx]
     
-    cat(sprintf("Processing batch %d of %d (features indicies %d to %d)\n", 
-                batch, num_batches, start_idx, end_idx))
+    if (verbose) {
+      cat(sprintf("Processing batch %d of %d (features indicies %d to %d)\n", 
+                  batch, num_batches, start_idx, end_idx))
+    }
     
     for (f in batch_features) {
-      cat(sprintf("Feature %s\n", f))
+      if (verbose) cat(sprintf("Feature %s\n", f))
       
       # Filter data - using data.table approach when possible for efficiency
       if (inherits(mse_frame, "data.table")) {
@@ -502,7 +516,9 @@ run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * subtiss
         models[[f]] <- m
         
       }, error = function(e) {
-        cat(sprintf("Error in feature %s: %s\n", f, e$message))
+        if (verbose) {
+          cat(sprintf("Error in feature %s: %s\n", f, e$message))
+        }
       })
       
       # Clear some memory
@@ -511,7 +527,7 @@ run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * subtiss
     }
     
     # Perform thorough garbage collection between batches
-    gc(full = TRUE, verbose = TRUE)
+    gc(full = TRUE, verbose = verbose)
     
     # Save intermediate results to disk if desired
     # saveRDS(model_results, paste0("model_results_batch_", batch, ".rds"))

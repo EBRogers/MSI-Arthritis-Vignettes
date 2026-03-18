@@ -48,8 +48,6 @@ load("Simulation-Data/sim_list_original.RData")
 ##### Add in effects and run models #####
 
 delta_in_roi <- 30
-gamma <- sqrt(35)
-resid_gamma <- sqrt(35)
 resid <- sqrt(70)
 
 
@@ -67,29 +65,17 @@ effects_shuffled_subtissue <- tibble(mz = mz(sim_list_original[[1]]),
                   condition = c(rep(0,2500), rep(delta_in_roi,500)),
                   ROI_defining_features = c(rep(ROI_def_delta,50),rep(-ROI_def_delta,50), rep(0,2900)))
 
-set.seed(2025)
-gamma_mat_cad <- matrix(rnorm(4*nrow(effects_normal_subtissue), sd = gamma), nrow = 4)
-gamma_mat_oa <- matrix(rnorm(4*nrow(effects_normal_subtissue), sd = gamma), nrow = 4)
-gamma_mat_cad <- scale(gamma_mat_cad, center = TRUE, scale = FALSE)
-gamma_mat_oa <- scale(gamma_mat_oa, center = TRUE, scale = FALSE)
-gamma_mat <- rbind(gamma_mat_oa, gamma_mat_cad, gamma_mat_oa, gamma_mat_cad)
-
 set.seed(2026)
 residual_mat <- matrix(rnorm(16*nrow(effects_normal_subtissue), sd = resid), nrow = 16)
 residual_mat <- scale(residual_mat, center = TRUE, scale = FALSE)
 
-set.seed(2026)
-residual_mat_gamma <- matrix(rnorm(16*nrow(effects_normal_subtissue), sd = resid_gamma), nrow = 16)
-residual_mat_gamma <- scale(residual_mat_gamma, center = TRUE, scale = FALSE)
 
 
-
-#### effects without gamma ####
+#### effects ####
 effects_matrix_c2 <- sapply(1:16, function(i) {
   #samples[[i, "subtissue"]]*effects_normal_subtissue$subtissue + 
     samples[[i, "condition"]]*effects_normal_subtissue$condition +
     1*effects_normal_subtissue$ROI_defining_features +
-    #gamma_mat[i,] +
     residual_mat[i,] +
     baseline
 })
@@ -98,7 +84,6 @@ effects_matrix_c2_subtissue_normal <- sapply(1:16, function(i) {
   samples[[i, "subtissue"]]*effects_normal_subtissue$subtissue + 
   samples[[i, "condition"]]*effects_normal_subtissue$condition +
     1*effects_normal_subtissue$ROI_defining_features +
-    #gamma_mat[i,] +
     residual_mat[i,] +
     baseline
 })
@@ -107,14 +92,12 @@ effects_matrix_c2_subtissue_shuffled <- sapply(1:16, function(i) {
   samples[[i, "subtissue"]]*effects_shuffled_subtissue$subtissue + 
   samples[[i, "condition"]]*effects_shuffled_subtissue$condition +
     1*effects_shuffled_subtissue$ROI_defining_features +
-    #gamma_mat[i,] +
     residual_mat[i,] +
     baseline
 })
 
 effects_matrix_bg <- sapply(1:16, function(i) {
   -1*effects_normal_subtissue$ROI_defining_features +
-    #gamma_mat[i,] +
     residual_mat[i,] +
     baseline
 })
@@ -126,12 +109,12 @@ for (eff in c(effects_matrix_bg,
               effects_matrix_c2)) {
   
   if (any(eff < 0)){
-    stop(paste0("Some NON GAMMA effects in ", i, " have negative means."))
+    stop(paste0("Some effects in ", i, " have negative means."))
   }
   i <- i + 1
 }
 
-#### No subtissue, no gamma ####
+#### No subtissue ####
 
 sim_list_adj <- list()
 gc(verbose = T)

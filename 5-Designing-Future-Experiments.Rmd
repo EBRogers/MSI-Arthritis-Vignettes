@@ -3,163 +3,225 @@ title: "5-Designing-Future-Experiments"
 output: html_document
 ---
 
-```{r}
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+local({
+  hook_output <- knitr::knit_hooks$get('output')
+  knitr::knit_hooks$set(output = function(x, options) {
+    if (!is.null(options$max.height)) options$attr.output <- c(
+      options$attr.output,
+      sprintf('style="max-height: %s;"', options$max.height)
+    )
+    hook_output(x, options)
+  })
+})
+```
+
+Designing future experiments requires translating what we learned from the current data into practical planning quantities. Here, I use the fitted models from the cartilage analysis to estimate how many biological replicates a future study would need to detect differences of various magnitudes. The goal is not to produce a single universal sample size, but to show how the required number of subjects changes as the anticipated effect size and multiple-testing burden change.
+
+# Load required packages
+
+```{r library, results='hide', warning=FALSE, message=FALSE}
 library(tidyverse)
 library(Cardinal)
 library(lmerTest)
 library(emmeans)
 source("Utilities.R")
+```
 
-load(file.path("Outputs","cartilage_results.RData"))
-load("Outputs/signift_cartilage.RData")
+# Load model results and restrict to adequately fit features
 
-model_fit_eval <- read_csv("Outputs/feature-model-fit-evaluation.csv") |> 
+Power calculations are only as reasonable as the variance estimates that feed them. For that reason, I begin with the fitted cartilage models and retain only features that passed the model checks from the previous chapter. This keeps poorly behaved models from disproportionately influencing the planning values.
+
+```{r load-results}
+load(file.path("Outputs", "cartilage_results.RData"))
+
+signift_cartilage.RData
+
+model_fit_eval <- read_csv("Outputs/feature-model-fit-evaluation.csv", show_col_types = FALSE) |> 
   mutate(across(qq_normality:outliers, as.factor))
 
 passed <- model_fit_eval |> 
-          filter(qq_normality == "OK" & 
-            residual_variance == "OK" & 
-            outliers == "OK" )
+  filter(qq_normality == "OK" & 
+           residual_variance == "OK" & 
+           outliers == "OK")
 
 cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
+```
 
+# Extract planning quantities from the fitted models
+
+The previous mixed models separate variation attributable to subjects from residual variation. That distinction matters here because the two future comparisons have different variance structures:
+
+- **In Medial: Osteoarthritis vs Control** is a between-subject comparison, so both subject-level and residual variation contribute.
+- **In Osteoarthritis: Medial vs Lateral** is a within-subject comparison, so the design is less affected by subject-to-subject heterogeneity.
+
+To obtain stable planning values, we can summarize the variance components across adequately fit features and use their medians rather than selecting any single feature. I also compute a typical reference mean estimate so that differences on the intensity scale can be expressed as percent differences, which are easier to interpret.
+
+```{r extract-variance-components}
 df_var <- bind_rows(lapply(cartilage_models_OK_fit, function(m) {
   vc <- as.data.frame(VarCorr(m))
   sigma2_subject <- vc$vcov[1]
   sigma2_residual <- attr(VarCorr(m), "sc")^2
-  return(tibble(sigma2_residual = sigma2_residual, 
-                sigma2_subject = sigma2_subject,
-                intercept = coef(summary(m))[1,1],
-                condition = abs(coef(summary(m))[2,1]),
-                subtissue = abs(coef(summary(m))[3,1])))
+  tibble(sigma2_residual = sigma2_residual,
+         sigma2_subject = sigma2_subject,
+         intercept = coef(summary(m))[1, 1],
+         condition = abs(coef(summary(m))[2, 1]),
+         subtissue = abs(coef(summary(m))[3, 1]))
 })) %>% mutate(id = "Cartilage", feature_id = row_number())
 
+FDR <- 0.05
+power <- 0.9
 
-FDR = 0.05
-power = 0.9
+median.sigma.subject <- median(df_var$sigma2_subject, na.rm = TRUE)
+median.sigma.error <- median(df_var$sigma2_residual, na.rm = TRUE)
+median_denom_for_pct_delta <- median(signift_cartilage$reference_estimate, na.rm = TRUE)
+```
 
-median.sigma.subject = median(df_var$sigma2_subject, na.rm = T)
-median.sigma.error = median(df_var$sigma2_residual, na.rm = T)
-median_denom_for_pct_delta = median(signift_cartilage$reference_estimate, na.rm = T)
+# Define the sample size calculation
 
-## Large portion of proteins are not changing
-# m0_m1 <- 90 ## it means m0/m1=99, m0/(m0+m1)=0.99
+I will use a simple normal-approximation calculation to estimate the number of biological replicates needed to detect an anticipated difference with 90% power. The function below evaluates a range of possible effect sizes so that we can visualize the tradeoff between detectable percent difference and required sample size.
+
+```{r define-sample-size-function}
+calc_sample_size <- function(desired_difference,
+                             alpha,
+                             power,
+                             variance_estimate_without_I) {
+  delta <- seq(desired_difference[1], desired_difference[2], 0.1)
+  z_alpha <- qnorm(1 - alpha / 2)
+  z_beta <- qnorm(power)
+  aa <- z_alpha + z_beta
+  denom <- (delta / aa)^2
+  numSample <- variance_estimate_without_I / denom
+  data.frame(delta, numSample, FDR, power)
+}
+```
+
+# Specify multiple-testing scenarios and target comparisons
+
+In practice, future studies will rarely test just one feature. The effective significance threshold therefore depends on how severe the multiple-testing burden is expected to be. I consider three scenarios:
+
+- **No correction, i.e. a single comparison**, which serves as a best-case benchmark.
+- **FDR correction, 50% true negative rate**, representing a moderate multiple-testing burden.
+- **FDR correction, 90% true negative rate**, representing a more stringent setting in which most tested features are expected not to change.
+
+These scenarios are encoded through different alpha values. I then evaluate them for the two comparisons of interest from the previous chapters.
+
+```{r define-scenarios}
 alpha_1 <- power * FDR / (1 + (1 - FDR) * 1)
 alpha_90 <- power * FDR / (1 + (1 - FDR) * 90)
 alpha_50 <- power * FDR / (1 + (1 - FDR) * 50)
 
+comparison_labels <- c("In Osteoarthritis: Medial vs Lateral",
+                       "In Medial: Osteoarthritis vs Control")
+```
 
-calc_sample_size <- function(desired_difference,
-                                 alpha,
-                                 power,
-                                 variance_estimate_without_I){
-  delta <- seq(desired_difference[1], desired_difference[2], .1)
-  z_alpha <- qnorm(1-alpha/2)
-  z_beta <- qnorm(power)
-  aa <- (z_alpha+z_beta)
-  denom = (delta/aa)^2
-  #numSample <- round(variance_estimate_without_I/denom, 0)
-  numSample <- variance_estimate_without_I/denom
-  return(data.frame(delta,numSample,FDR,power))
-}
+The between-subject comparison uses `2*(median.sigma.error + median.sigma.subject)`, whereas the within-subject comparison uses `2*(median.sigma.error)`. This reflects the fact that pairing within subject removes some of the variation that would otherwise inflate the required sample size.
 
-comparison_labels = c("In Osteoarthritis: Medial vs Lateral", "In Medial: Osteoarthritis vs Control")
-
-
+```{r build-power-curves}
 df_curves <- bind_rows(
-  calc_sample_size(c(1,150),
-                              alpha_90,
-                              power,
-                              2*(median.sigma.error + median.sigma.subject)) %>%
+  calc_sample_size(c(1, 150),
+                   alpha_90,
+                   power,
+                   2 * (median.sigma.error + median.sigma.subject)) %>%
     mutate(id = "Condition", n_sig_test = 90),
-  
-  calc_sample_size(c(1,150),
-                              alpha_90,
-                              power,
-                              2*(median.sigma.error)) %>%
+
+  calc_sample_size(c(1, 150),
+                   alpha_90,
+                   power,
+                   2 * (median.sigma.error)) %>%
     mutate(id = "Subsection", n_sig_test = 90),
-  
-  calc_sample_size(c(1,150),
-                              alpha_50,
-                              power,
-                              2*(median.sigma.error + median.sigma.subject)) %>%
-    mutate(id = "Condition", n_sig_test = 50 ),
-  
-  calc_sample_size(c(1,150),
-                              alpha_50,
-                              power,
-                              2*(median.sigma.error)) %>%
+
+  calc_sample_size(c(1, 150),
+                   alpha_50,
+                   power,
+                   2 * (median.sigma.error + median.sigma.subject)) %>%
+    mutate(id = "Condition", n_sig_test = 50),
+
+  calc_sample_size(c(1, 150),
+                   alpha_50,
+                   power,
+                   2 * (median.sigma.error)) %>%
     mutate(id = "Subsection", n_sig_test = 50),
-  calc_sample_size(c(1,150),
-                              alpha_1,
-                              power,
-                              2*(median.sigma.error + median.sigma.subject)) %>%
-    mutate(id = "Condition", n_sig_test = 1 ),
-  
-  calc_sample_size(c(1,150),
-                              alpha_1,
-                              power,
-                              2*(median.sigma.error)) %>%
+
+  calc_sample_size(c(1, 150),
+                   alpha_1,
+                   power,
+                   2 * (median.sigma.error + median.sigma.subject)) %>%
+    mutate(id = "Condition", n_sig_test = 1),
+
+  calc_sample_size(c(1, 150),
+                   alpha_1,
+                   power,
+                   2 * (median.sigma.error)) %>%
     mutate(id = "Subsection", n_sig_test = 1)
 ) %>%
-  mutate(comparison = factor(ifelse(id=="Subsection",
+  mutate(comparison = factor(ifelse(id == "Subsection",
                                     comparison_labels[1],
                                     comparison_labels[2]),
                              levels = comparison_labels),
          n_sig_test = factor(n_sig_test,
                              levels = c(1, 50, 90),
-                             labels = c("No correction, i.e. a single comparison", 
-                                        "FDR correction, 50% true negative rate", 
+                             labels = c("No correction, i.e. a single comparison",
+                                        "FDR correction, 50% true negative rate",
                                         "FDR correction, 90% true negative rate")))
+```
 
+# Visualize how effect size and multiple testing affect sample size
 
-# ggplot(df_curves,
-#        aes(x = delta, y = numSample, color = comparison)) + 
-#   geom_line(aes(linetype = n_sig_test), linewidth = 1) +
-#   geom_hline(yintercept = 4, linetype = "dashed", alpha = 0.5) +
-#   scale_linetype_manual(values = c("solid", "31", "11"), 
-#                         name = "Multiple Testing Correction") +
-#   theme_bw() +
-#   ylab("Miminum Number of Subjects") +
-#   xlab("Anticipated Difference of Mean Intensity") +
-#   xlim(0, 40) +
-#   ylim(0, 32) +
-#   labs(color = "Comparison") +
-#   theme(legend.position = "bottom") +
-#   guides(color = guide_legend(order = 1, nrow = 2, theme = theme(legend.title.position = "top")),
-#          linetype = guide_legend(order = 2, nrow = 3, theme = theme(legend.title.position = "top")))
-# 
-# ggsave("sample_size_curves.png", height = 6, width = 6, units = "in")
+To make the curves easier to interpret, I convert the anticipated absolute intensity difference into a percent difference relative to a typical reference mean. The x-axis therefore represents the absolute value of the anticipated percent difference in mean intensity, and the y-axis gives the minimum number of biological replicates required for 90% power. The horizontal line at 4 marks a practically attractive target, since small MSI studies are often constrained by cost, throughput, or tissue availability.
 
-greys <- c("In Osteoarthritis: Medial vs Lateral" = "grey70", "In Medial: Osteoarthritis vs Control" = "grey30")
+The line types show how the required sample size changes as the multiple-testing burden becomes more stringent. The two colors distinguish the within-subject and between-subject comparisons. If the darker curve lies above the lighter one, that indicates the between-subject comparison is harder to power and requires more subjects for the same anticipated effect size.
+
+```{r power-curve-plot}
+greys <- c("In Osteoarthritis: Medial vs Lateral" = "grey70",
+           "In Medial: Osteoarthritis vs Control" = "grey30")
+
 ggplot(df_curves,
-       aes(x = delta/median_denom_for_pct_delta, y = numSample, color = comparison)) + 
+       aes(x = delta / median_denom_for_pct_delta,
+           y = numSample,
+           color = comparison)) +
   geom_line(aes(linetype = n_sig_test), linewidth = 0.9) +
-  geom_hline(yintercept = 4,  alpha = 0.5, linewidth = .7) +
-  scale_linetype_manual(values = c("solid", "31", "11"), 
+  geom_hline(yintercept = 4, alpha = 0.5, linewidth = 0.7) +
+  scale_linetype_manual(values = c("solid", "31", "11"),
                         name = "Multiple Testing Correction") +
   theme_bw() +
   ylab("Minimum Number of Biological Replicates") +
   xlab("Absolute Value of Anticipated Percent Difference of Mean Intensities") +
-  #xlim(0, 40) +
   ylim(0, 20) +
   labs(color = "Comparison") +
   theme(legend.position = "bottom") +
-  scale_x_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0.11,0.5)) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0.11, 0.5)) +
   scale_color_manual(values = greys) +
-  guides(color = guide_legend(order = 1, nrow = 2, theme = theme(legend.title.position = "top")),
-         linetype = guide_legend(order = 2, nrow = 3, theme = theme(legend.title.position = "top")))
+  guides(color = guide_legend(order = 1, nrow = 2,
+                              theme = theme(legend.title.position = "top")),
+         linetype = guide_legend(order = 2, nrow = 3,
+                                 theme = theme(legend.title.position = "top")))
 
-ggsave(file.path("Recreated-Figures", paste0("Figure-Designing-Future-Experiments-Power.png")), height = 6, width = 6, units = "in")
+ggsave(file.path("Recreated-Figures",
+                 "Figure-Designing-Future-Experiments-Power.png"),
+       height = 6,
+       width = 6,
+       units = "in")
+```
 
+As expected, increasing the multiple-testing burden shifts the curves upward, meaning that stricter control of false discoveries requires more subjects to detect the same effect size. Likewise, the between-subject comparison is generally more demanding than the within-subject comparison because it carries both residual and subject-level variability.
+
+# Identify effect sizes that correspond to roughly 4 biological replicates
+
+One practical way to read the figure is to ask what size difference would be needed to keep the study near 4 biological replicates under the more stringent correction setting. The table below extracts the point on each 90% true-negative-rate curve nearest that target.
+
+```{r summarize-four-replicate-threshold}
 df_curves %>% 
   filter(n_sig_test == "FDR correction, 90% true negative rate") %>% 
   group_by(comparison) %>% 
-  filter(abs(numSample-4) == min(abs(numSample-4))) %>% 
-  mutate(pct_delta = delta/median_denom_for_pct_delta)
-  
-  
-  
-
-
+  filter(abs(numSample - 4) == min(abs(numSample - 4))) %>% 
+  mutate(pct_delta = delta / median_denom_for_pct_delta)
 ```
+
+These thresholds provide a useful planning heuristic. If a future study expects effects at least this large, then a design with roughly 4 biological replicates may be realistic even after accounting for multiple testing. If the expected effects are smaller, then the curves indicate that more replicates will likely be necessary.
+
+# Take-home interpretation
+
+The main lesson from this exercise is that study design depends strongly on both the expected effect size and the testing burden. Within-subject contrasts are easier to power than between-subject contrasts, and aggressive multiple-testing correction can quickly raise sample size requirements. For future MSI experiments, these curves are best used as planning guides: choose the comparison of interest, decide what effect size is scientifically meaningful, and then read off the approximate number of biological replicates required under a realistic multiple-testing scenario.
