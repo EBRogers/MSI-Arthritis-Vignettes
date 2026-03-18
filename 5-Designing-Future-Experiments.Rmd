@@ -1,6 +1,9 @@
 ---
 title: "5-Designing-Future-Experiments"
-output: html_document
+author: "Ethan Rogers"
+date: "03/20/2026"
+output:
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -18,7 +21,7 @@ local({
 })
 ```
 
-Designing future experiments requires translating what we learned from the current data into practical planning quantities. Here, I use the fitted models from the cartilage analysis to estimate how many biological replicates a future study would need to detect differences of various magnitudes. The goal is not to produce a single universal sample size, but to show how the required number of subjects changes as the anticipated effect size and multiple-testing burden change.
+Designing future experiments requires translating what we learned from the current experiment into practical planning quantities. Here, we use the fitted models from the cartilage analysis to estimate the number of biological replicates a future study would need to detect differences of various magnitudes. The goal is not to produce a single universal sample size, but to show how the required number of subjects changes as the anticipated effect size and multiple-testing burden change.
 
 # Load required packages
 
@@ -28,11 +31,14 @@ library(Cardinal)
 library(lmerTest)
 library(emmeans)
 source("Utilities.R")
+
+setCardinalVerbose(verbose = FALSE)
+gcinfo(verbose = FALSE)
 ```
 
 # Load model results and restrict to adequately fit features
 
-Power calculations are only as reasonable as the variance estimates that feed them. For that reason, I begin with the fitted cartilage models and retain only features that passed the model checks from the previous chapter. This keeps poorly behaved models from disproportionately influencing the planning values.
+Power calculations are only as reasonable as the variance estimates that feed them. For that reason, we will begin with the fitted cartilage models and retain only features that passed the model diagnostic checks evaluating deviation from model assumptions.
 
 ```{r load-results}
 load(file.path("Outputs", "cartilage_results.RData"))
@@ -52,12 +58,12 @@ cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
 
 # Extract planning quantities from the fitted models
 
-The previous mixed models separate variation attributable to subjects from residual variation. That distinction matters here because the two future comparisons have different variance structures:
+Mixed effects models separate variation attributable to subjects (biological variation) from residual variation. Models estimate variance components, but as what we care about for future experiments is the detection of differences, i.e., the power of the tests (not the models), standard errors are what we will focus on. Standard errors are the variances of the estimates of differences, such as our hypotheses. Some hypotheses have multiple sources of variance, like those looking at differences between groups composed of different subjects.
 
 - **In Medial: Osteoarthritis vs Control** is a between-subject comparison, so both subject-level and residual variation contribute.
-- **In Osteoarthritis: Medial vs Lateral** is a within-subject comparison, so the design is less affected by subject-to-subject heterogeneity.
+- **In Osteoarthritis: Medial vs Lateral** is a within-subject comparison, so each subject acts as their own control. Therefore, the sinal must only overcome the residual (remaining, technical) variation. 
 
-To obtain stable planning values, we can summarize the variance components across adequately fit features and use their medians rather than selecting any single feature. I also compute a typical reference mean estimate so that differences on the intensity scale can be expressed as percent differences, which are easier to interpret.
+To obtain stable planning values, we can summarize the variance components across adequately fit features and use their median. We will also compute a typical reference mean estimate so that differences on the intensity scale can be expressed as percent differences, which are easier to interpret. We will also fix the power at 0.9 and the target FDR at 0.05. As you can see, there are many assumptions and "degrees of freedom" in these calculations. Using median variance estimates (as opposed to means) helps reduce the effect of very high or very low values. Additionally, in targeted future experiments that care about a single analyte, we can use the variances from a single model.
 
 ```{r extract-variance-components}
 df_var <- bind_rows(lapply(cartilage_models_OK_fit, function(m) {
@@ -100,13 +106,13 @@ calc_sample_size <- function(desired_difference,
 
 # Specify multiple-testing scenarios and target comparisons
 
-In practice, future studies will rarely test just one feature. The effective significance threshold therefore depends on how severe the multiple-testing burden is expected to be. I consider three scenarios:
+In practice, future studies will rarely test just one feature. The effective significance threshold therefore depends on how severe the multiple-testing burden is expected to be. Let us consider three scenarios:
 
 - **No correction, i.e. a single comparison**, which serves as a best-case benchmark.
-- **FDR correction, 50% true negative rate**, representing a moderate multiple-testing burden.
+- **FDR correction, 50% true negative rate**, where we would expect half the features to be changing, such as a strong intervention perhaps.
 - **FDR correction, 90% true negative rate**, representing a more stringent setting in which most tested features are expected not to change.
 
-These scenarios are encoded through different alpha values. I then evaluate them for the two comparisons of interest from the previous chapters.
+These scenarios are operationalized with different alpha values. We will then evaluate them for the hypotheses.
 
 ```{r define-scenarios}
 alpha_1 <- power * FDR / (1 + (1 - FDR) * 1)
@@ -169,12 +175,7 @@ df_curves <- bind_rows(
 ```
 
 # Visualize how effect size and multiple testing affect sample size
-
-To make the curves easier to interpret, I convert the anticipated absolute intensity difference into a percent difference relative to a typical reference mean. The x-axis therefore represents the absolute value of the anticipated percent difference in mean intensity, and the y-axis gives the minimum number of biological replicates required for 90% power. The horizontal line at 4 marks a practically attractive target, since small MSI studies are often constrained by cost, throughput, or tissue availability.
-
-The line types show how the required sample size changes as the multiple-testing burden becomes more stringent. The two colors distinguish the within-subject and between-subject comparisons. If the darker curve lies above the lighter one, that indicates the between-subject comparison is harder to power and requires more subjects for the same anticipated effect size.
-
-```{r power-curve-plot}
+```{r power-curve-plot, message=F, warning=F}
 greys <- c("In Osteoarthritis: Medial vs Lateral" = "grey70",
            "In Medial: Osteoarthritis vs Control" = "grey30")
 
@@ -206,11 +207,15 @@ ggsave(file.path("Recreated-Figures",
        units = "in")
 ```
 
+To make the curves easier to interpret, we have converted the anticipated absolute intensity difference into a percent difference relative to a typical reference mean. The x-axis therefore represents the absolute value of the anticipated percent difference in mean intensity, and the y-axis gives the minimum number of biological replicates required for 90% power, given the median estimates of variances from our experiment. The horizontal line at 4 marks the replication (number of biological replicates) of the OA study. 
+
+The line types show how the required sample size changes as the multiple-testing burden becomes more stringent. The two colors distinguish the within-subject and between-subject comparisons. As we can see, the lighter curves (hypothesis B) lie below the darker curves (hypothesis A) for each multiple testing correction, reflecting the systematically lower amount of variation, and thus increased sensitivity for the same number of replicates, of the within-subjects comparisons.
+
 As expected, increasing the multiple-testing burden shifts the curves upward, meaning that stricter control of false discoveries requires more subjects to detect the same effect size. Likewise, the between-subject comparison is generally more demanding than the within-subject comparison because it carries both residual and subject-level variability.
 
 # Identify effect sizes that correspond to roughly 4 biological replicates
 
-One practical way to read the figure is to ask what size difference would be needed to keep the study near 4 biological replicates under the more stringent correction setting. The table below extracts the point on each 90% true-negative-rate curve nearest that target.
+Another way to interpret the figure above is to ask what size difference would be needed to keep the study near 4 biological replicates under the more stringent correction setting. The table below extracts the point on each 90% true-negative-rate curve nearest that target.
 
 ```{r summarize-four-replicate-threshold}
 df_curves %>% 
@@ -220,9 +225,3 @@ df_curves %>%
   mutate(Percent_Change = delta / median_denom_for_pct_delta * 100) |>
   knitr::kable()
 ```
-
-These thresholds provide a useful planning heuristic. If a future study expects effects at least this large, then a design with roughly 4 biological replicates may be realistic even after accounting for multiple testing. If the expected effects are smaller, then the curves indicate that more replicates will likely be necessary.
-
-# Take-home interpretation
-
-The main lesson from this exercise is that study design depends strongly on both the expected effect size and the testing burden. Within-subject contrasts are easier to power than between-subject contrasts, and aggressive multiple-testing correction can quickly raise sample size requirements. For future MSI experiments, these curves are best used as planning guides: choose the comparison of interest, decide what effect size is scientifically meaningful, and then read off the approximate number of biological replicates required under a realistic multiple-testing scenario.

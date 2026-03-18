@@ -1,6 +1,7 @@
 ---
 title: "2-Filtering-Aggregation"
 author: "Ethan Rogers"
+date: "03/20/2026"
 output:
   html_document: default
 ---
@@ -40,6 +41,7 @@ zero_to_na <- function(x, mz) {
 }
 
 setCardinalVerbose(verbose = FALSE)
+gcinfo(verbose = FALSE)
 ```
 
 ## Find peak-picked and normalized imzML files
@@ -145,7 +147,7 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 
 # Feature clustering
 
-Clustering of related features is an active field of research with many implementations. Choosing a clustering algorithm should be done based on what you want to cluster (related molecules, spatial analogs, isotopes, adducts, precursors, etc.) and the methods to cluster (spatial similarity, kendrick mass defect, intensity ratios, etc.). As such, we treat feature clustering as an interchangeable step that takes in MSIs and meaningful feature clusters to the experiment.
+Clustering of related features is an active field of research with many implementations. Choosing a clustering algorithm should be done based on what you want to cluster (related molecules, spatial analogs, isotopes, adducts, precursors, etc.) and the methods to cluster (spatial similarity, kendrick mass defect, intensity ratios, etc.). As such, we treat feature clustering as an interchangeable step that takes in MSIs and returns meaningful feature clusters to the experiment.
 
 As of version 3.6, Cardinal does not offer feature clustering methods. In this work we have used DeepION ([ACS Paper](https://doi.org/10.1021/acs.analchem.3c05002), [Github](https://github.com/gankLei-X/DeepION)) to cluster isotopes. We have also explored mzClustering ([Bioinformatics Paper](https://doi.org/10.1093/bioinformatics/btad067), [Original Github](https://github.com/DanGuo1223/mzClustering), [Github of install-ready version, made possible by Nihira Golasangi](https://github.com/NihiraGolasangi/mzClustering-mass-spectrometry-imaging)). At the time of publication, these methods were experimentally tested but lacked easy-to-install implementations. mzClustering has been updated by Nihira Golasangi to be install-ready from Github. DeepION may require more work to reconcile package conflicts, especially if using Apple M series chipsets. Because these methods exist external to this workflow and are interchangeable with other clustering methodologies, we will prepare the input files for both methods and provide the output of DeepION for clustering.
 
@@ -159,11 +161,11 @@ First, extract the intensity matrix of each sample, and bind their columns. Both
 k <- as.matrix(intensity(mse))
 ```
 
-Each row of a MSE intensity matrix represents a feature, and each column a pixel. Matrix values are intensities. Keep in mind that MSEs are (usually) irregularly shaped, and `Cardinal` only stores the intensities that are actual sample values. This presents an issue: both DeepION and mzClustering require rectangular images.
+Each row of a `MSImagingExperiment` intensity matrix represents a feature, and each column a pixel. Matrix values are intensities. Keep in mind that `MSImagingExperiment` objects usually represent irregularly-shaped samples rastered into a coordinate system, and `Cardinal` only stores the intensities that are actual sample values. This presents an issue: both DeepION and mzClustering require rectangular images.
 
 We could use `sliceImage` to get 3D array of $x \times y \times n_{features}$ - a cube with rectangular slices (features), where the non-sample background of the rectangular slice is NAs - but it would make the images much larger (artificially, mostly NAs) and require more memory.
 
-Instead we will use the fact that, along with a 2D intensity matrix, DeepION and mzClustering take the dimensions of the image as a parameter. Using those dimensions, the algorithms extract the intensity vector of each feature (each row of the intensity matrix, a set of pixel intensities in the order of $(x_1,y_1),(x_2,y_1),...,(x_n,y_n)$) and reshape the vector using the supplied dimensions. Therefore we shall zero pad the bound intensity arrays, such that each row can be reshaped into a square image. This will disrupt the spatial relationship between pixels - when reshaping each feature image, the new dimensions will be different from the original *and* there are no sample background pixels - but the spatial relationships *between* features will be preserved.
+Instead we will use the fact that, along with a 2D intensity matrix, DeepION and mzClustering take the dimensions of the image as a parameter. Using those dimensions, the algorithms extract the intensity vector of each feature (each row of the intensity matrix, a set of pixel intensities in the order of $P_{x=1,y=1}, P_{x=2,y=2}...P_{x=dim(x),y=dim(y)}$) and reshape the vector using the supplied dimensions. Therefore we shall zero pad the bound intensity arrays, such that each row can be reshaped into a square image. This will disrupt the spatial relationship between pixels - when reshaping each feature image, the new dimensions will be different from the original *and* there are no sample background pixels - but the spatial relationships *between* features will be preserved.
 
 ```{r create_algo_matrix_zero_pad}
 # start with the length (# of columns) of the bound intensity matrix

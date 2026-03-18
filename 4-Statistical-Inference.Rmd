@@ -1,6 +1,9 @@
 ---
 title: "4-Statistical-Inference"
-output: html_document
+author: "Ethan Rogers"
+date: "03/20/2026"
+output:
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -40,15 +43,19 @@ library(Cardinal)
 library(lmerTest)
 library(emmeans)
 source("Utilities.R")
+
+setCardinalVerbose(verbose = FALSE)
+gcinfo(verbose = FALSE)
 ```
 
 # Test hypotheses of interest
 
-Like statistical modeling, we perform statistical testing in Cardinal or externally. Both approaches require specifying a contrast. Formally, a contrast is a linear combination of coefficients for each term in the model that sum to zero. More simply, a contrast is a set of coefficients that, when multiplied in sequence with the model parameter estimates, sums to the estimate of the comparison being tested in the hypothesis that uses all model terms. We generally don't have to specify them ourselves and can instead use the terms of the model or design with the statistical packages.
+Like statistical modeling, we perform statistical testing in Cardinal or externally. Both approaches require specifying a contrast. Formally, a contrast is a linear combination of coefficients for each term in the model that sum to zero. More simply, a contrast is a set of coefficients that, when multiplied in sequence with the model parameter estimates, sums to the estimate of the comparison being tested in the hypothesis that uses all model terms. We generally don't have to specify them ourselves and can instead use the terms of the model with standard statistical packages.
 
 ## Method 1: Comparison testing in Cardinal
 
-`Cardinal::contrast()` offers arguments to specify custom contrasts using `emmeans` syntax and performed using `emmeans`. First, we will load the `meansTest` results object from 3-Statistical-Modeling. The results object contains a summary data frame accessible with `mtops()` and the `lmer` models.
+`Cardinal::contrast()` offers arguments to specify custom contrasts using `emmeans` syntax and performed using `emmeans`. First, we will load the `meansTest` results object from 3-Statistical-Modeling. The results object contains a summary data frame accessible with `mtops()` and the `lmer` models. We will also load the results from manual diagnosis of model fit, creating a list of features that adequately meet model assumptions.
+
 
 ```{r load_imzML}
 load("Outputs/meansTest_cartilage_lmer.RData")
@@ -67,8 +74,6 @@ passed <- model_fit_eval |>
 
 In `emmeans`, which Cardinal uses for hypothesis testing and which we will use externally, we can specify `~ condition | tissue` as `contrast.specs` for Hypothesis A (i.e., "condition given tissue"). To get the actual pairwise contrasts, we supply `"pairwise"` as the `contrast.method`. `emmeans` offers tremendous functionality and versatility, with [many possible ways to specify contrasts](https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html). We will explore other syntax when we repeat these analyses externally from Cardinal in the next part of this workflow.
 
-We will rerun means tests with the appropriate contrast arguments, muting the outputs for brevity.
-
 ```{r, results='hide', message=FALSE, warning=FALSE}
 
 measTest_models_with_acceptable_fit <- lmer_means_test[passed$feature_id]
@@ -76,19 +81,19 @@ measTest_models_with_acceptable_fit <- lmer_means_test[passed$feature_id]
 h <- Cardinal::contrastTest(measTest_models_with_acceptable_fit, ~condition * tissue, method="pairwise")
 ```
 
-Cardinal adds tests to the results object in a wide fashion, with each test having an identifying prefix. Here are the results from the second feature model:
+Cardinal adds tests to the results object in a wide fashion, with each test having an identifying prefix. That is quite ugly, so below is an example of the `emmeans` object returned for each model, in this case the first feature model for `r round(h@elementMetadata[1,2], 3)` m/z.
 
 ```{r}
-knitr::kable(h[[2]])
+knitr::kable(h[[1]])
 ```
 
-Notice there are two sets of tests: `contrast.pairwise.Control.vs.Osteoarthritis.at.Lateral_*` and `contrast.pairwise.Control.vs.Osteoarthritis.at.Medial_*`. As we can see, `emmeans` conducted Control vs. Osteoarthritis in both levels of tissue (Lateral and Medial). **For our purposes, we only care about the last comparison,** `contrast.pairwise.Control.vs.Osteoarthritis.at.Medial_*`. Each comparison offers an `estimate`, `t_ratio`, and `p_value`. The `estimate` is the effect estimate and `t_ratio` the signal (estimate) to noise (standard error of the estimate) ratio.
+Notice there are six tests - every pairwise combination of the 4 (2x2) unique levels of condition and tissue. For our purposes, we only care about the `Control Medial - Osteoarthritis Medial` (hypothesis A) and `Osteoarthritis Lateral - Osteoarthritis Medial` (hypothesis B). Each comparison offers an `estimate`, `t_ratio` (aka t-statistic), and `p_value`. The `estimate` is the effect estimate and `t_ratio` the signal (estimate) to noise (standard error of the estimate) ratio. To get the reverse, say, `Osteoarthritis Medial - Osteoarthritis Lateral`, simply flip the sign of the estimate and t ratio. All else will be the same.
 
-We can see that the p-value is large (`r cat("contrast.pairwise.Control.vs.Osteoarthritis.at.Medial_p_value=",h[2]@elementMetadata[[12]], sep = "")`), on the second m/z feature from Hypothesis A above, indicating that we cannot reject the null hypothesis; any difference in mean abundance between conditions in medial tissues is not statistically significant.
+We can see that the p-value is large for `r round(h@elementMetadata[1,2], 3)` m/z from Hypothesis A above, indicating that we cannot reject the null hypothesis; any difference in mean abundance between conditions in medial tissues is not statistically significant.
 
 ### Correct for multiple testing
 
-Running more tests increases the probability that one of the tests will be a false positive. We can correct for this in a variety of ways, such as globally lowering the threshold for significance (e.g., the Bonferroni correction). The preferred method, however, is to correct the false discovery rate (FDR), or the probability that a positive test is actually false. By setting an acceptable rate of positive tests that are false (in our case 0.05, or 5%, per hypothesis), we can apply a less strict correction. Cardinal includes a function for FDR correction, `topFeatures`.
+Running more tests increases the probability that one of the tests will be a false positive. We can correct for this in a variety of ways, such as globally lowering the threshold for significance (e.g., the Bonferroni correction). The preferred method, however, is to correct the false discovery rate (FDR), or the false-positive rate of just our positive tests. By setting an acceptable rate of positive tests that are false (in our case 0.05, or 5%, independently per hypothesis), we can apply a less strict correction. Cardinal includes a function for FDR correction, `topFeatures`.
 
 ```{r}
 kableExtra::kbl(topFeatures(h, n=5, sort.by = 2)) |>
@@ -138,12 +143,13 @@ Like in Cardinal, we will test comparisons externally with `emmeans` again, show
 ```{r}
 load(file.path("Outputs","cartilage_results.RData"))
 
+cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
 ```
 
-We will write a function to perform test hypotheses for each model, but first, let's experiment with different ways to specify contrasts in `emmeans`, using the second feature model.
+We will write a function to perform test hypotheses for each model, but first, let's experiment with different ways to specify contrasts in `emmeans`, again using the model for `r round(h@elementMetadata[1,2], 3)` m/z.
 
 ```{r}
-m <- cartilage_res[[1]][[2]]
+m <- cartilage_models_OK_fit[[1]]
 ```
 
 ### Run tests
@@ -185,10 +191,6 @@ contrast(emmeans_grid,
 Now, let's write a function to test Hypothesis A and B on all models. This function also extracts the mean estimate for the reference so that we can compute the percent change.
 
 ```{r}
-
-cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
-
-# Run contrasts
 signift_cartilage <- bind_rows(lapply(cartilage_models_OK_fit, FUN = function(m){
     emmeans_grid <- emmeans(m, ~ condition * tissue, lmer.df = "satterthwaite")
     k <- contrast(emmeans_grid,
@@ -273,7 +275,7 @@ signift_cartilage |>
   ggsave("Recreated-Figures/SI-Figure-Statistical-Inference-PValue-Dists.png", height = 5.75, width = 6, units = "in")
 ```
 
-As the distribution of p-values is neither uniform nor right-skewed, there may be some interdependence between tests. This is not surprising, as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `qvalue` package.
+As the distribution of p-values is neither uniform nor right-skewed, there may be some interdependence between tests, but this is hard to verify with so few tests overall. It would not be surprising were there interdependence however, as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `locfdr` package.
 
 This code below will recreate the tables and figures from the manuscript.
 ```{r}

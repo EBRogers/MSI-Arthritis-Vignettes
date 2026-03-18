@@ -1,5 +1,7 @@
 ---
 title: "1-Preprocessing"
+author: "Ethan Rogers"
+date: "03/20/2026"
 output:
   html_document: default
 ---
@@ -33,6 +35,7 @@ source("Utilities.R")
 RNGkind("L'Ecuyer-CMRG")
 
 setCardinalVerbose(verbose = FALSE)
+gcinfo(verbose = FALSE)
 ```
 
 # Data availability
@@ -122,7 +125,7 @@ mse_recalibrated <- recalibrate(mse,
   ref = reference_peaks, tolerance = tol, units = "ppm")
 ```
 
-Before recalibration, `mse` holds metadata in memory and its intensity matrix out-of-memory. After recalibration, `mse` holds metadata AND the recalibrated intensity matrix (the result of the recalibration step) IN memory. We will address this by writing the results of each intermediate to disk as .imzML files, garbage collecting the object, and reloading the results via `readMSIData`; leaving us with results as out-of-memory objects. To check an objects memory usage, include in-memory and out-of-memory usage, one can use `matter::mem(object)`. See `?matter::mem` for additional details.
+Before recalibration, `mse` holds metadata in memory and its intensity matrix out-of-memory. After recalibration, `mse` holds metadata AND the recalibrated intensity matrix (the result of the recalibration step) IN memory. We will address this by writing the results of each intermediate to disk as .imzML files, garbage collecting the object, and reloading the results via `readMSIData`; leaving us with results as out-of-memory objects. To check an object's memory usage, include in-memory and out-of-memory usage, one can use `matter::mem(object)`. See `?matter::mem` for additional details.
 
 # Peak picking
 
@@ -231,7 +234,7 @@ This chain conducts multiple steps, yielding a single `MSImagingExperiment` obje
 - `process` actually executes the above steps.
 - `summarizeFeatures` summarizes pixel intensities by features. Keep in mind that these summaries are across all values from every sample - now represented as runs in the `MSImagingExperiment` object
 
-The final step, changing the `spectrumRepresentation`, ensures that Cardinal writes the object to disk as centroided.
+The final step, changing the `spectrumRepresentation`, ensures that Cardinal writes the object to disk as centroided. (This is not always necessary and is done to ensure backwards compatibility with previous versions of Cardinal v3.)
 
 After these steps, the resulting combined image will have an orders-of-magnitude smaller memory footprint, as we are no longer maintaining separate mass axes for each spectrum and non-centroided peaks. The object should easily fit in memory.
 
@@ -313,7 +316,6 @@ for (rn in runNames(mse_all_filt)) {
                 "Individual-Picked-Aligned-Filtered", 
                 paste0(rn, ".imzML")))
 }
-gc()
 ```
 
 Remove unnecessary objects from memory.
@@ -404,19 +406,19 @@ m <- summarizeFeatures(m,
                           force.GC = T))
 ```
 
-We chose m/z `r mz(m)[cartilage_feature_ids]` as the cartilage marker, as it accurately defines cartilage across the greatest number of tissues. Below is a single tissue.
+We chose m/z `r round(mz(m)[cartilage_feature_ids],3)` as the cartilage marker, as it accurately defines cartilage across the greatest number of tissues. Below is a single tissue.
 
 ```{r roi_vis_cartilage}
 image(m, i = cartilage_feature_ids, key = F)
 ```
 
-There were seven m/z values indicative of background/ECM: `r mz(m)[background_feature_ids]`
+There were seven m/z values indicative of background/ECM: `r round(mz(m)[background_feature_ids],3)`
 
--   M/z `r mz(m)[background_feature_ids[1:3]]` are Glufib and +1, +2, and +3 isotopes/H adducts.
+-   M/z `r round(mz(m)[background_feature_ids[1:3]],3)` are Glufib, +1, and +2 isotopes.
 
--   M/z `r mz(m)[background_feature_ids[4:6]]` are *potentially* Glufib +23 sodium adducts and +1 and +2 isotopes/H adducts.
+-   M/z `r round(mz(m)[background_feature_ids[4:6]],3)` are *potentially* Glufib +23 sodium adducts and +1 and +2 isotopes.
 
--   M/z `r mz(m)[background_feature_ids[7]]` is a highly consistent spatial analog, similar enough to include in ROI segmentation.
+-   M/z `r round(mz(m)[background_feature_ids[7]],3)` is an identical spatial analog, similar enough to include in ROI segmentation.
 
 ```{r roi_vis_background}
 image(m, i = background_feature_ids,
@@ -861,12 +863,12 @@ m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx])
 
 ## A note on sparsity
 
-Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mix of concepts: zero intensity, intensity below the limit of detection, and missing values. Although each is subtly different, they are highly interlinked due to the nature of mass spectrometry. In practice, they behave similarly, but these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries downwards, especially means. Missing values are often dropped, meaning that summaries are biased upwards towards non-missing values. There is no good way around this predicament other than to reduce sparsity by defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
+Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mix of concepts: zero intensity, intensity below the limit of detection, and missing values. Although each is subtly different, they are highly interlinked due to the nature of mass spectrometry. In practice, they behave similarly, but these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries towards zero, especially means. Missing values are often dropped, meaning that summaries are biased larger towards non-missing values. There is no good way around this predicament other than to reduce sparsity by defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
 
 
 ## Preparing spectra for median normalization
 
-In our testing, we found median normalization was less biased by outliers than TIC normalization. The trade-off is that TIC normalization is *slightly* more robust to sparsity. Median normalization is simple: compute the median intensity for each spectrum (pixel), then scale each pixel by that median. Although simple, this still presents issues. If the median of a spectrum is zero, then the scaled intensity becomes undefined. If we replace zeros with missing values, then recompute the median dropping missing values, the median will be biased larger. There is no easy answer. For this analysis, we chose to replace zeros with NA values, as leaving zeros in would result in zero-inflation of mean abundance at the time of statistical modeling. Zero inflation breaks the assumption that residual values are normally distributed.
+In our testing, we found median normalization was less biased by outliers than TIC normalization. The trade-off is that TIC normalization is *slightly* more robust to sparsity. Median normalization is simple: compute the median intensity of each m/z value for each pixel, then scale each m/z value of the pixel so that each median is the same. Although simple, this still presents issues. If the median of a spectrum is zero, then the scaled intensity becomes undefined. If we replace zeros with missing values, then recompute the median dropping missing values, the median will be biased larger. There is no easy answer. For this analysis, we chose to replace zeros with NA values, as leaving zeros in would result in zero-inflation of mean abundance at the time of statistical modeling. Zero inflation breaks the assumption that residual values are normally distributed.
 
 Even still, we found that median normalization can be highly biased by outliers. True outliers are rare, but can be of very high magnitude. We chose to clip medians at the 95th percentile to control outliers. These steps are performed in the chunk below using matter's `addProcessing` function to queue steps for parallel processing.
 
@@ -980,12 +982,12 @@ print(plot(normalized, "mean",
 
 dev.off()
 
-normalized |>
+knitr::kable(normalized |>
   subsetPixels(run == "6891-OA-lateral") |>
   summarizeFeatures(stat = c("mean", "sd"), na.rm = T) |>
   fData() |>
   as_tibble() |>
   filter(mean != 0 | sd != 0) |>
   mutate(cv = sd/mean) |>
-  summarise(mean_cv = mean(cv, na.rm = T))
+  summarise(mean_cv = mean(cv, na.rm = T)))
 ```
