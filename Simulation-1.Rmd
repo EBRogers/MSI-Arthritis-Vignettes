@@ -599,7 +599,7 @@ accuracy_frame_ssc <- run_models_to_test_ssc_roi[[2]] |>
   group_by(isPos, truePos) |>
   count() |>
   ungroup() |>
-  full_join(res_labels) |>
+  full_join(res_labels, by = join_by(isPos, truePos)) |>
   mutate(n = replace_na(n, 0))
 
 accuracy_frame_oracle <- run_models_to_test_oracle_roi[[2]] |>
@@ -610,7 +610,7 @@ accuracy_frame_oracle <- run_models_to_test_oracle_roi[[2]] |>
   group_by(isPos, truePos) |>
   count() |>
   ungroup() |>
-  full_join(res_labels) |>
+  full_join(res_labels, by = join_by(isPos, truePos)) |>
   mutate(n = replace_na(n, 0))
 
 accuracy_frame_skm <- run_models_to_test_skm_roi_7c[[2]] |>
@@ -621,7 +621,7 @@ accuracy_frame_skm <- run_models_to_test_skm_roi_7c[[2]] |>
   group_by(isPos, truePos) |>
   count() |>
   ungroup() |>
-  full_join(res_labels) |>
+  full_join(res_labels, by = join_by(isPos, truePos)) |>
   mutate(n = replace_na(n, 0))
 
 accuracy_frame_ssc
@@ -697,7 +697,7 @@ This plot is especially useful because it separates two ideas that often get con
 
 The script concludes with Venn diagrams comparing top-ranked features from selected SSC and SKM segmentations to the true differentiating feature set. I view these as supporting diagnostics rather than the primary result, but they are still informative because they show whether the methods are prioritizing the same mass features as the truth set.
 
-```{r overlap-diagnostics, fig.width=8, fig.height=8, message=FALSE, warning=FALSE}
+```{r overlap-diagnostics, fig.width=8, fig.height=8, results='hide', message=FALSE, warning=FALSE}
 library(VennDiagram)
 library(RColorBrewer)
 
