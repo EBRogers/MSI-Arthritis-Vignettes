@@ -36,8 +36,8 @@ Power calculations are only as reasonable as the variance estimates that feed th
 
 ```{r load-results}
 load(file.path("Outputs", "cartilage_results.RData"))
+load(file.path("Outputs", "signift_cartilage.RData"))
 
-signift_cartilage.RData
 
 model_fit_eval <- read_csv("Outputs/feature-model-fit-evaluation.csv", show_col_types = FALSE) |> 
   mutate(across(qq_normality:outliers, as.factor))
@@ -217,7 +217,8 @@ df_curves %>%
   filter(n_sig_test == "FDR correction, 90% true negative rate") %>% 
   group_by(comparison) %>% 
   filter(abs(numSample - 4) == min(abs(numSample - 4))) %>% 
-  mutate(pct_delta = delta / median_denom_for_pct_delta)
+  mutate(Percent_Change = delta / median_denom_for_pct_delta * 100) |>
+  knitr::kable()
 ```
 
 These thresholds provide a useful planning heuristic. If a future study expects effects at least this large, then a design with roughly 4 biological replicates may be realistic even after accounting for multiple testing. If the expected effects are smaller, then the curves indicate that more replicates will likely be necessary.
