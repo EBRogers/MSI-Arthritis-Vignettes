@@ -24,3 +24,5 @@ knit_preprocessing.sh
 renv.lock
 Simulation-Data/sim_list_original.RData
 Render-All.R
+massive_upload.sh
+massive_upload_completed.log
