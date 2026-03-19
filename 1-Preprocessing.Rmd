@@ -25,12 +25,12 @@ local({
 Preprocessing has many functions, but the overarching goals include reducing nuisance variation, increasing variation of interest (signal), and enabling comparisons between samples. The choices made during preprocessing can significantly impact the results of downstream analyses. Important steps include loading data, peak recalibration, peak picking, peak alignment, region of interest (ROI) selection, and normalization.
 
 # Load dependencies
-```{r load-dependencies}
+```{r load-dependencies, results='hide', warning=FALSE, message=FALSE}
 library(dplyr)
 library(tibble)
 library(Cardinal)
 
-source("Utilities.R")
+source(file.path("Utilities.R"))
 
 RNGkind("L'Ecuyer-CMRG")
 
@@ -340,7 +340,7 @@ library(data.table)
 library(tibble)
 library(Cardinal)
 
-source("Utilities.R")
+source(file.path("Utilities.R"))
 
 RNGkind("L'Ecuyer-CMRG")
 
@@ -564,7 +564,7 @@ mse_list_segmented <- BiocParallel::bplapply(
   mse_list_pp,
   function(mse) {
 
-    source("Utilities.R")
+    source(file.path("Utilities.R"))
 
     # bug in matter - needs to be here for now
     setMethod("as.vector", "sparse_arr",
@@ -712,9 +712,9 @@ ggplot(hc_class_plotting_frame |>
 A better approach would be to run the sDGMM segmentation on the single `MSImagingExperiment` object, thereby forcing the algorithm to consider every run's spatial distribution in unison. This could potentially make segmentation more comparable across runs but may also overfit to intensity differences that would have been corrected during normalization. As the peaks used for background/bone segmentation were the mass calibrants (that must be removed before median or TIC normalization, or become uninformative after being used as a reference during reference normalization) we could not conduct segmentation after normalization.
 
 ```{r fig-ROI, results='hide', warning=FALSE, message=FALSE, echo=FALSE}
-p <- ggplot(hc_class_plotting_frame %>% 
-         left_join(name_tibble) %>%
-         filter(condition=="Control") %>%
+p <- ggplot(hc_class_plotting_frame |> 
+         left_join(name_tibble) |>
+         filter(condition=="Control") |>
          mutate(roi = case_match(tissue_zone, 
                                  "bone" ~ "Bone",
                                  "background" ~ "Background",
@@ -732,14 +732,14 @@ ggsave(file.path("Recreated-Figures",
         "Figure-ROI-Control.png"), 
       plot = p, height = 5, width = 6 , units = "in")
 
-p <- ggplot(hc_class_plotting_frame %>% 
-         left_join(name_tibble) %>%
-         filter(condition=="Osteoarthritis") %>%
+p <- ggplot(hc_class_plotting_frame |> 
+    left_join(name_tibble) |>
+    filter(condition=="Osteoarthritis") |>
          mutate(roi = case_match(tissue_zone, 
                                  "bone" ~ "Bone",
                                  "background" ~ "Background",
                                  "cartilage" ~ "Cartilage"),
-                lateral = grepl("lateral", run)) %>%
+      lateral = grepl("lateral", run)) |>
          arrange(lateral), 
        aes(x = x, y = -1*y, fill = roi)) + 
   geom_tile() +
@@ -783,19 +783,19 @@ pData(m)$tissue_zone <- roi_list |>
 filter(run == "6891-OA-lateral") |>
 pull(tissue_zone)
 
-p <- bind_cols(as_tibble(pData(m)), mi) %>% 
+p <- bind_cols(as_tibble(pData(m)), mi) |> 
   tidyr::pivot_longer(14:15,
                names_prefix = "feature_",
                names_to = "mz",
-               values_to = "intensity") %>%
+               values_to = "intensity") |>
   mutate(tissue_zone_recode = case_match(tissue_zone, 
                                          "background" ~ "Background",
                                          "bone" ~ "Bone",
                                          "cartilage" ~ "Cartilage",),
-         mz_fct = factor(round(as.numeric(mz),3))) %>%
-  filter(is.na(intensity) == F & intensity>0) %>%
-  group_by(tissue_zone_recode, mz_fct) %>%
-  mutate(mean_intensity = mean(intensity, na.rm = T)) %>%
+         mz_fct = factor(round(as.numeric(mz),3))) |>
+  filter(is.na(intensity) == F & intensity>0) |>
+  group_by(tissue_zone_recode, mz_fct) |>
+  mutate(mean_intensity = mean(intensity, na.rm = T)) |>
   ggplot(aes(x = intensity, fill = tissue_zone_recode)) +
   geom_histogram(bins = 100) +
   facet_grid(tissue_zone_recode~mz_fct) +
@@ -824,13 +824,13 @@ gc()
 
 Normalization exists to decrease nuisance variation and enhance signal, but relies on a set of assumptions. Briefly, normalization schemes that scale by a global constant (e.g., TIC, median) assume that few analytes are truly changing and that the amount of signal is constant between spectra. Reference normalization assumes the signal of the reference is constant across spectra. Normalization remains an active field of research, with few definite recommendations available aside from the necessity of some normalization scheme. 
 
-```{r normalization-dependencies}
+```{r normalization-dependencies, results='hide', warning=FALSE, message=FALSE}
 library(dplyr)
 library(tibble)
 library(data.table)
 library(Cardinal)
 
-source("Utilities.R")
+source(file.path("Utilities.R"))
 
 RNGkind("L'Ecuyer-CMRG")
 setCardinalVerbose(TRUE)
@@ -975,8 +975,6 @@ png(filename = file.path("Recreated-Figures",
 
 print(plot(normalized, "mean", 
      ylab = "Mean Pixel Intensity", 
-     #xlim = c(850, 2500), 
-     #ylim = c(0, 850),
      run = "6891-OA-lateral",
      grid = F))
 

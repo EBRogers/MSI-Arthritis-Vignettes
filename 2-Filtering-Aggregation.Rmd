@@ -25,7 +25,7 @@ Filtering and aggregation of peak-picked and normalized MSI data further concent
 
 ## Load required packages and data
 
-```{r library, results='hide', warning=FALSE, message=FALSE}
+```{r library, include=FALSE, results='hide', warning=FALSE, message=FALSE}
 library(dplyr)
 library(tibble)
 library(tidyr)
@@ -33,7 +33,7 @@ library(ggplot2)
 library(data.table)
 library(fuzzyjoin)
 library(Cardinal)
-source("Utilities.R")
+source(file.path("Utilities.R"))
 
 zero_to_na <- function(x, mz) {
   x[x == 0] <- NA_real_
@@ -48,7 +48,7 @@ gcinfo(verbose = FALSE)
 
 ```{r find_imzML}
 COMBINED_DATA_PATH <- file.path("Data","Preprocessing","normalized.imzML")
-load("Outputs/roi_list.Rdata")
+load(file.path("Outputs", "roi_list.Rdata"))
 ```
 
 ## Load peak-picked imzML files
@@ -123,8 +123,8 @@ mz_to_keep <- mz(subsetFeatures(mse_no_background,
 Let's visualize the filter.
 
 ```{r ns_filt_visualize}
-as_tibble(fData(mse_no_background)) %>% 
-  mutate(keep = !(mean < quantile(mean, p = 0.25) & sd < quantile(sd, p = 0.25))) %>% 
+as_tibble(fData(mse_no_background)) |>
+  mutate(keep = !(mean < quantile(mean, p = 0.25) & sd < quantile(sd, p = 0.25))) |>
   ggplot(aes(x = mean, y = sd, color = keep)) +
   geom_point(alpha = 0.4)
 ```
@@ -232,7 +232,7 @@ mse <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFilt
                 verbose = F)
 
 deepion_iso_output_file <- file.path("Outputs", "output_super_image_708.txt")
-iso <- readr::read_csv(deepion_iso_output_file, show_col_types = F) %>% 
+iso <- readr::read_csv(deepion_iso_output_file, show_col_types = F) |>
   mutate(group_id = row_number())
 knitr::kable(head(iso))
 ```
@@ -240,12 +240,12 @@ knitr::kable(head(iso))
 Reshape so that each row is a feature.
 
 ```{r reshape_deepion_output}
-iso <- iso %>% 
+iso <- iso |>
   pivot_longer(monoisotope : isotope_2, 
                names_to = "isotope", 
                names_prefix = "isotope_", 
-               values_to = "mz") %>% 
-  filter(mz > 0) %>%
+               values_to = "mz") |>
+  filter(mz > 0) |>
   dplyr::select(mz, group_id)
 knitr::kable(head(iso))
 ```
@@ -253,13 +253,13 @@ knitr::kable(head(iso))
 Unfortunately DeepION does not preserve all decimal points of the original m/z values. We will need to do a fuzzy merge to get the original values for Cardinal.
 
 ```{r fuzzyjoin_deepion_output}
-iso_merged <- iso %>% 
+iso_merged <- iso |>
   difference_right_join(tibble(mz = as.numeric(mz(mse)), 
                               feature_id = 1:nrow(fData(mse))),
                        by = 'mz',
                        max_dist = 0.0001,
-                       distance_col = "mz_delta") %>% 
-  dplyr::select(group_id, feature_id, `mz.y`) %>% 
+                       distance_col = "mz_delta") |>
+  dplyr::select(group_id, feature_id, `mz.y`) |>
   dplyr::rename("mz" = `mz.y` )
 knitr::kable(head(iso_merged))
 ```
@@ -283,10 +283,10 @@ Now let's drop low abundance isotopes, keeping only the feature with the highest
 #sanity check
 all(mz(mse)==iso_merged$mz)
   
-isotopes_to_keep <- iso_merged %>% 
-                          group_by(group_id) %>% 
-                          filter(mean == max(mean)) %>% 
-                          ungroup() %>% 
+isotopes_to_keep <- iso_merged |>
+                          group_by(group_id) |>
+                          filter(mean == max(mean)) |>
+                          ungroup() |>
                           pull(mz)
 
 mse <- subsetFeatures(mse, mz %in% isotopes_to_keep)
@@ -431,12 +431,12 @@ knitr::kable(
 
 m <- subsetPixels(mse_ns_filt, mse_ns_filt$run == "6891-OA-lateral")
 
-jl_3 <- sort(unique(iso_merged %>% group_by(group_id) %>% 
-  mutate(n = n()) %>% ungroup() %>% filter(n == 3) %>% pull(group_id)))
+jl_3 <- sort(unique(iso_merged |> group_by(group_id) |>
+  mutate(n = n()) |> ungroup() |> filter(n == 3) |> pull(group_id)))
 
-id_1 <- iso_merged %>% filter(group_id %in% c(258)) %>% pull(feature_id)
-id_2 <- iso_merged %>% filter(group_id %in% c(312)) %>% pull(feature_id)
-id_3 <- iso_merged %>% filter(group_id %in% c(566)) %>% pull(feature_id)
+id_1 <- iso_merged |> filter(group_id %in% c(258)) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id %in% c(312)) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id %in% c(566)) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-3-isotope-sii.png"), width = 1500, height = 900, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3]), 
@@ -452,10 +452,10 @@ image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_
 dev.off()
 
 ######### 38, 41, 45, 50, 65
-jl <- sort(unique(iso_merged %>% group_by(group_id) %>% mutate(n = n()) %>% ungroup() %>% filter(n == 2) %>% pull(group_id)))
-id_1 <- iso_merged %>% filter(group_id == jl[3]) %>% pull(feature_id)
-id_2 <- iso_merged %>% filter(group_id == jl[6]) %>% pull(feature_id)
-id_3 <- iso_merged %>% filter(group_id == jl[11]) %>% pull(feature_id)
+jl <- sort(unique(iso_merged |> group_by(group_id) |> mutate(n = n()) |> ungroup() |> filter(n == 2) |> pull(group_id)))
+id_1 <- iso_merged |> filter(group_id == jl[3]) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id == jl[6]) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id == jl[11]) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-2-isotope-sii.png"), width = 1500, height = 700, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]), 
@@ -477,22 +477,22 @@ dev.off()
 
 ```{r}
 
-paste0(iso_merged %>% 
-         group_by(group_id) %>% 
-         mutate(n = n()) %>% 
-         ungroup() %>% filter(n == 1) %>% mutate(mzr = round(mz, 4)) %>% pull(mzr),
+paste0(iso_merged |>
+         group_by(group_id) |>
+         mutate(n = n()) |>
+         ungroup() |> filter(n == 1) |> mutate(mzr = round(mz, 4)) |> pull(mzr),
        collapse = ", ")
 
-paste0(iso_merged %>% 
-         group_by(group_id) %>% 
-         mutate(n = n()) %>% 
-         ungroup() %>% filter(n == 2) %>% mutate(mzr = round(mz, 4)) %>% pull(mzr),
+paste0(iso_merged |>
+         group_by(group_id) |>
+         mutate(n = n()) |>
+         ungroup() |> filter(n == 2) |> mutate(mzr = round(mz, 4)) |> pull(mzr),
        collapse = ", ")
 
-paste0(iso_merged %>% 
-         group_by(group_id) %>% 
-         mutate(n = n()) %>% 
-         ungroup() %>% filter(n == 3) %>% mutate(mzr = round(mz, 4)) %>% pull(mzr),
+paste0(iso_merged |>
+         group_by(group_id) |>
+         mutate(n = n()) |>
+         ungroup() |> filter(n == 3) |> mutate(mzr = round(mz, 4)) |> pull(mzr),
        collapse = ", ")
 
 ```

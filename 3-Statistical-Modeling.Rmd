@@ -32,6 +32,7 @@ library(data.table)
 library(lmerTest)
 library(emmeans)
 library(Cardinal)
+library(broom.mixed)
 source("Utilities.R")
 
 zero_to_na <- function(x, mz) {
@@ -115,7 +116,7 @@ Note: `meansTest` does not support LRTs for `lme4::lmer()` models, so the `stati
 Let's save the combined image and `lme4::lmer()` results for later.
 
 ```{r}
-save(lmer_means_test, file = "Outputs/meansTest_cartilage_lmer.RData")
+save(lmer_means_test, file = file.path("Outputs", "meansTest_cartilage_lmer.RData"))
 ```
 
 
@@ -127,7 +128,6 @@ First, let us create a helper function to run the models and extract the results
 
 ```{r}
 # Helper function to model and catch errors
-library(broom.mixed)
 model_and_extract <- function(mse_frame, form) {
   models <- list()
   for (f in unique(mse_frame$feature_id)) {
@@ -206,7 +206,7 @@ Now we can run the models, using the same formula as before. `Cardinal::meansTes
 cartilage_res <- model_and_extract(mse_frame, "cartilage.mean ~ condition * tissue + (1|subject)")
 ```
 ```{r}
-save(cartilage_res, file = "Outputs/cartilage_results.RData")
+save(cartilage_res, file = file.path("Outputs", "cartilage_results.RData"))
 
 rmarkdown::paged_table(head(cartilage_res[[2]]))
 ```
@@ -570,7 +570,7 @@ ggplot(df, aes(sample = sample)) +
   labs(x = "Theoretical (Normal) Quantiles",
        y = "Residual Quantiles")
 
-ggsave("Recreated-Figures/SI-Figure-Statistical-Modeling-QQ-Examples.png", width = 8, height = 4)
+ggsave(file.path("Recreated-Figures", "SI-Figure-Statistical-Modeling-QQ-Examples.png"), width = 8, height = 4)
 ```
 
 Let us also look at Normality when we only have 8 biological replicates. Our models assume that the distribution of random effects is normal overall, and within each experimental variable. (In this example, we only have condition.)
@@ -591,8 +591,6 @@ for (s in 1:8) {
 }
 
 
-library(ggpubr)
-
 ggarrange(
 ggplot(df, aes(y = sample, x = condition)) +
   geom_boxplot(alpha = 0.5, outliers = F) +
@@ -608,7 +606,7 @@ ggplot(df, aes(y = sample, x = as.factor(subject))) +
   ylim(-2,3),
 nrow = 1, labels = c("A", "B"), widths = c(.35, 1))
 
-ggsave("Recreated-Figures/SI-Figure-Statistical-Modeling-Constant-Variance.png", width = 6, height = 4)
+ggsave(file.path("Recreated-Figures", "SI-Figure-Statistical-Modeling-Constant-Variance.png"), width = 6, height = 4)
 
 ```
 

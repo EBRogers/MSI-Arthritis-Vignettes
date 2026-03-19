@@ -669,7 +669,7 @@ bind_rows(
              "True/False Negative"),
       levels = c("True Positive", "False Positive", "True/False Negative")
     ),
-    id = factor(id, levels = c("oracle", "ssc", "skm"))
+    id = factor(id, levels = c("oracle", "ssc", "skm"), labels = c("Segmentation with single known informative marker", "Segmentation with Spatial Shrunken Centroids", "Segmentation with Spatial K Means"))
   ) |>
   ggplot(aes(x = estimate_condition1, y = -log(fdr.p.value_condition1), color = fdr_finding_pos_only)) +
   geom_point(alpha = 0.65) +
@@ -689,6 +689,8 @@ bind_rows(
   ) +
   theme_bw() +
   theme(legend.position = "bottom")
+
+ggsave(file.path("Recreated-Figures","SI-Figure-Simualtion-1-ROI-Volcano-Plots.png"), height = 4.5, width = 6, units = "in")
 ```
 
 This plot is especially useful because it separates two ideas that often get conflated: effect-size estimation and statistical significance. A segmentation method may recover a roughly correct ROI boundary yet still distort the estimated effect sizes or significance pattern.
