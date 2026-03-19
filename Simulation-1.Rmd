@@ -251,7 +251,7 @@ sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i) {
     na.rm = TRUE,
     verbose = FALSE
   )
-}, BPPARAM = MulticoreParam(4))
+}, BPPARAM = SnowfastParam(8))
 ```
 
 This is the core of the simulation. The code first sets the whole image to the background mean structure and then selectively rescales only the oracle ROI pixels to the ROI mean structure. Because this is done feature by feature, the resulting data preserve both spatial localization and feature-specific variability.
@@ -268,12 +268,12 @@ The first is spatial shrunken centroids (SSC), using multiple penalty values. Th
 sscl <- bplapply(sim_list_adj, FUN = function(m) {
   set.seed(123456789, kind = "L'Ecuyer-CMRG")
   spatialShrunkenCentroids(m, k = 4, s = c(6, 9, 12, 15), weights = "adaptive")
-}, BPPARAM = SnowfastParam(8))
+}, BPPARAM = SnowfastParam(16))
 
 skml_7c <- bplapply(sim_list_adj, FUN = function(m) {
   set.seed(123456789, kind = "L'Ecuyer-CMRG")
   spatialKMeans(m, k = 7, weights = "adaptive")
-}, BPPARAM = SnowfastParam(8))
+}, BPPARAM = SnowfastParam(16))
 ```
 
 These parameter choices are part of what the simulation is actually testing. The oracle ROI is known, so segmentation quality can be evaluated after the fact. SSC and SKM are not being used here as discovery tools in the usual sense; they are being benchmarked against a known target.
@@ -359,8 +359,6 @@ control_sample_id <- intersect(
   results_list_skm_7c[[3]] |> filter(condition == 0) |> pull(id)
 )[1]
 
-trt_sample_id
-control_sample_id
 ```
 
 This is a practical decision rather than a modeling decision. By choosing samples that are usable across both methods, the resulting figures remain directly comparable.
@@ -370,7 +368,6 @@ This is a practical decision rather than a modeling decision. By choosing sample
 The original simulation script writes several Cardinal image panels to disk to show the ROI-defining features, a null feature, a truly differential feature, and the oracle and recovered segmentations. Those images are helpful context, so here we display the same comparisons inline while also saving them.
 
 ```{r contextual-simulation-images, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
-manage_directory("Recreated-Figures")
 
 save_cardinal_plot <- function(filename, expr, width = 600, height = 1200) {
   png(filename = file.path("Recreated-Figures", filename), width = width, height = height)
@@ -669,7 +666,7 @@ bind_rows(
              "True/False Negative"),
       levels = c("True Positive", "False Positive", "True/False Negative")
     ),
-    id = factor(id, levels = c("oracle", "ssc", "skm"), labels = c("Segmentation with single known informative marker", "Segmentation with Spatial Shrunken Centroids", "Segmentation with Spatial K Means"))
+    id = factor(id, levels = c("oracle", "ssc", "skm"), labels = c("Segmentation with single\nknown informative marker", "Segmentation with Spatial\nShrunken Centroids", "Segmentation with Spatial K Means"))
   ) |>
   ggplot(aes(x = estimate_condition1, y = -log(fdr.p.value_condition1), color = fdr_finding_pos_only)) +
   geom_point(alpha = 0.65) +
@@ -690,7 +687,7 @@ bind_rows(
   theme_bw() +
   theme(legend.position = "bottom")
 
-ggsave(file.path("Recreated-Figures","SI-Figure-Simualtion-1-ROI-Volcano-Plots.png"), height = 4.5, width = 6, units = "in")
+ggsave(file.path("Recreated-Figures","SI-Figure-Simualtion-1-ROI-Volcano-Plots.png"), height = 5, width = 8, units = "in")
 ```
 
 This plot is especially useful because it separates two ideas that often get conflated: effect-size estimation and statistical significance. A segmentation method may recover a roughly correct ROI boundary yet still distort the estimated effect sizes or significance pattern.
@@ -703,8 +700,6 @@ The script concludes with Venn diagrams comparing top-ranked features from selec
 library(VennDiagram)
 library(RColorBrewer)
 
-manage_directory("Recreated-Figures")
-
 ssc_control_charting_sample <- sscl[[which(samples$id == control_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == control_sample_id)]]$ssc_index]]
 ssc_trt_charting_sample <- sscl[[which(samples$id == trt_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == trt_sample_id)]]$ssc_index]]
 
@@ -712,8 +707,8 @@ ssc_venn_args <- list(
   x = list(topFeatures(ssc_control_charting_sample, n = 500)$i,
            topFeatures(ssc_trt_charting_sample, n = 500)$i,
            2501:3000),
-  category.names = c("Top 500 Features\nfrom a control image",
-                     "Top 500 Features\nfrom a treatment image",
+  category.names = c("Top 500 Features\nfrom a control (Cond B) image",
+                     "Top 500 Features\nfrom a treatment (Cond A) image",
                      "True differentiating features"),
   disable.logging = TRUE,
   imagetype = "png",
@@ -733,7 +728,7 @@ ssc_venn_args <- list(
   margin = 0.1
 )
 
-ssc_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-Shared-Features.png")
+ssc_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-Diff-Abun-Shared-Features.png")
 do.call(
   venn.diagram,
   c(
@@ -746,6 +741,45 @@ do.call(
 )
 knitr::include_graphics(ssc_venn_file)
 
+
+ssc_venn_roidiff_args <- list(
+  x = list(topFeatures(ssc_control_charting_sample, n = 100)$i,
+           topFeatures(ssc_trt_charting_sample, n = 100)$i,
+           1:100),
+  category.names = c("Top 100 Features\nfrom a control (Cond B) image",
+                     "Top 100 Features\nfrom a treatment (Cond A) image",
+                     "True 100 ROI-defining features"),
+  disable.logging = TRUE,
+  imagetype = "png",
+  height = 1000,
+  width = 1000,
+  resolution = 300,
+  compression = "lzw",
+  pointsize = 18,
+  lwd = 2,
+  lty = "blank",
+  fill = brewer.pal(3, "Pastel2"),
+  euler.d = TRUE,
+  sep.dist = 2,
+  fontfamily = "sans",
+  cat.cex = 0.6,
+  cat.fontfamily = "sans",
+  margin = 0.1
+)
+
+ssc_venn_roidiff_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-ROI-Def-Shared-Features.png")
+do.call(
+  venn.diagram,
+  c(
+    ssc_venn_roidiff_args,
+    list(
+      filename = ssc_venn_roidiff_file,
+      output = TRUE
+    )
+  )
+)
+knitr::include_graphics(ssc_venn_roidiff_file)
+
 skm_control_charting_sample <- skml_7c[[which(samples$id == control_sample_id)]]
 skm_trt_charting_sample <- skml_7c[[which(samples$id == trt_sample_id)]]
 
@@ -753,8 +787,8 @@ skm_venn_args <- list(
   x = list(topFeatures(skm_control_charting_sample, n = 500)$i,
            topFeatures(skm_trt_charting_sample, n = 500)$i,
            2501:3000),
-  category.names = c("Top 500 Features\nfrom a control image",
-                     "Top 500 Features\nfrom a treatment image",
+  category.names = c("Top 500 Features\nfrom a control (cond B) image",
+                     "Top 500 Features\nfrom a treatment (cond A) image",
                      "True differentiating features"),
   disable.logging = TRUE,
   imagetype = "png",
@@ -774,7 +808,7 @@ skm_venn_args <- list(
   margin = 0.1
 )
 
-skm_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-Shared-Features.png")
+skm_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-Diff-Abun-Shared-Features.png")
 do.call(
   venn.diagram,
   c(
@@ -786,6 +820,46 @@ do.call(
   )
 )
 knitr::include_graphics(skm_venn_file)
+
+
+
+skm_venn_roidef_args <- list(
+  x = list(topFeatures(skm_control_charting_sample, n = 100)$i,
+           topFeatures(skm_trt_charting_sample, n = 100)$i,
+           1:100),
+  category.names = c("Top 100 Features\nfrom a control (cond B) image",
+                     "Top 100 Features\nfrom a treatment (cond A) image",
+                     "True differentiating features"),
+  disable.logging = TRUE,
+  imagetype = "png",
+  height = 1000,
+  width = 1000,
+  resolution = 300,
+  compression = "lzw",
+  pointsize = 18,
+  lwd = 2,
+  lty = "blank",
+  fill = brewer.pal(3, "Pastel2"),
+  euler.d = TRUE,
+  sep.dist = 2,
+  fontfamily = "sans",
+  cat.cex = 0.6,
+  cat.fontfamily = "sans",
+  margin = 0.1
+)
+
+skm_venn_roidef_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-ROI-Def-Shared-Features.png")
+do.call(
+  venn.diagram,
+  c(
+    skm_venn_roidef_args,
+    list(
+      filename = skm_venn_roidef_file,
+      output = TRUE
+    )
+  )
+)
+knitr::include_graphics(skm_venn_roidef_file)
 ```
 
 # Interpretation

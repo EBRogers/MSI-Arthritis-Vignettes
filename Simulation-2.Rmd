@@ -188,8 +188,6 @@ At this point the simulation has created one summary value per sample and featur
 To keep the simulation concrete, it is helpful to look at representative null and affected features. Feature `1000` lies in the null half of the spectrum, whereas feature `2500` lies in the affected half.
 
 ```{r representative-simulation-images, fig.width=8, fig.height=4, message=FALSE, warning=FALSE}
-manage_directory("Recreated-Figures")
-
 m_context <- cbind(sim_list_adj[[1]], sim_list_adj[[12]])
 
 image(
