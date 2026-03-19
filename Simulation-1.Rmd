@@ -370,10 +370,10 @@ This is a practical decision rather than a modeling decision. By choosing sample
 The original simulation script writes several Cardinal image panels to disk to show the ROI-defining features, a null feature, a truly differential feature, and the oracle and recovered segmentations. Those images are helpful context, so here we display the same comparisons inline while also saving them.
 
 ```{r contextual-simulation-images, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
-manage_directory("Recreated_Figures")
+manage_directory("Recreated-Figures")
 
 save_cardinal_plot <- function(filename, expr, width = 600, height = 1200) {
-  png(filename = file.path("Recreated_Figures", filename), width = width, height = height)
+  png(filename = file.path("Recreated-Figures", filename), width = width, height = height)
   on.exit(dev.off(), add = TRUE)
   print(eval.parent(substitute(expr)))
 }
@@ -703,7 +703,7 @@ The script concludes with Venn diagrams comparing top-ranked features from selec
 library(VennDiagram)
 library(RColorBrewer)
 
-manage_directory("Recreated_Figures")
+manage_directory("Recreated-Figures")
 
 ssc_control_charting_sample <- sscl[[which(samples$id == control_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == control_sample_id)]]$ssc_index]]
 ssc_trt_charting_sample <- sscl[[which(samples$id == trt_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == trt_sample_id)]]$ssc_index]]
@@ -733,7 +733,7 @@ ssc_venn_args <- list(
   margin = 0.1
 )
 
-ssc_venn_file <- file.path("Recreated_Figures", "Figure-ROI-Simulation-1-SSC-Venn-Shared-Features.png")
+ssc_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-Shared-Features.png")
 do.call(
   venn.diagram,
   c(
@@ -774,7 +774,7 @@ skm_venn_args <- list(
   margin = 0.1
 )
 
-skm_venn_file <- file.path("Recreated_Figures", "Figure-ROI-Simulation-1-SKM-Venn-Shared-Features.png")
+skm_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-Shared-Features.png")
 do.call(
   venn.diagram,
   c(

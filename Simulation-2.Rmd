@@ -188,7 +188,7 @@ At this point the simulation has created one summary value per sample and featur
 To keep the simulation concrete, it is helpful to look at representative null and affected features. Feature `1000` lies in the null half of the spectrum, whereas feature `2500` lies in the affected half.
 
 ```{r representative-simulation-images, fig.width=8, fig.height=4, message=FALSE, warning=FALSE}
-manage_directory("Recreated_Figures")
+manage_directory("Recreated-Figures")
 
 m_context <- cbind(sim_list_adj[[1]], sim_list_adj[[12]])
 
@@ -502,7 +502,7 @@ ggarrange(
   heights = c(1, 0.05, 1.2)
 )
 
-ggsave(file.path("Recreated_Figures", "Figure-Variation-Simulation-2.png"), width = 11.5, height = 10, units = "in")
+ggsave(file.path("Recreated-Figures", "Figure-Variation-Simulation-2.png"), width = 11.5, height = 10, units = "in")
 ```
 
 This figure is the payoff of the first subsection. It shows that the same truth status can lead to different inferential behavior depending on how the variance is partitioned and which test is used.
@@ -765,7 +765,7 @@ annotate_figure(
   )
 )
 
-ggsave(file.path("Recreated_Figures", "Figure-Variation-Simulation-2-Pixels-as-Replicates.png"), width = 11.5, height = 6, units = "in")
+ggsave(file.path("Recreated-Figures", "Figure-Variation-Simulation-2-Pixels-as-Replicates.png"), width = 11.5, height = 6, units = "in")
 ```
 
 The practical interpretation is straightforward. Once pixels are treated as replicates, the apparent amount of information increases substantially, but that does not mean the analysis has gained independent biological replication. This is the statistical tension the simulation is meant to illustrate.
