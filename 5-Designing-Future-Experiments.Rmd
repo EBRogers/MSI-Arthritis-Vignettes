@@ -30,7 +30,7 @@ library(tidyverse)
 library(Cardinal)
 library(lmerTest)
 library(emmeans)
-source("Utilities.R")
+source(file.path("Utilities.R"))
 
 setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
@@ -45,7 +45,7 @@ load(file.path("Outputs", "cartilage_results.RData"))
 load(file.path("Outputs", "signift_cartilage.RData"))
 
 
-model_fit_eval <- read_csv("Outputs/feature-model-fit-evaluation.csv", show_col_types = FALSE) |> 
+model_fit_eval <- read_csv(file.path("Outputs", "feature-model-fit-evaluation.csv"), show_col_types = FALSE) |> 
   mutate(across(qq_normality:outliers, as.factor))
 
 passed <- model_fit_eval |> 
@@ -75,7 +75,7 @@ df_var <- bind_rows(lapply(cartilage_models_OK_fit, function(m) {
          intercept = coef(summary(m))[1, 1],
          condition = abs(coef(summary(m))[2, 1]),
          subtissue = abs(coef(summary(m))[3, 1]))
-})) %>% mutate(id = "Cartilage", feature_id = row_number())
+})) |> mutate(id = "Cartilage", feature_id = row_number())
 
 FDR <- 0.05
 power <- 0.9
@@ -130,39 +130,39 @@ df_curves <- bind_rows(
   calc_sample_size(c(1, 150),
                    alpha_90,
                    power,
-                   2 * (median.sigma.error + median.sigma.subject)) %>%
+                   2 * (median.sigma.error + median.sigma.subject)) |>
     mutate(id = "Condition", n_sig_test = 90),
 
   calc_sample_size(c(1, 150),
                    alpha_90,
                    power,
-                   2 * (median.sigma.error)) %>%
+                   2 * (median.sigma.error)) |>
     mutate(id = "Subsection", n_sig_test = 90),
 
   calc_sample_size(c(1, 150),
                    alpha_50,
                    power,
-                   2 * (median.sigma.error + median.sigma.subject)) %>%
+                   2 * (median.sigma.error + median.sigma.subject)) |>
     mutate(id = "Condition", n_sig_test = 50),
 
   calc_sample_size(c(1, 150),
                    alpha_50,
                    power,
-                   2 * (median.sigma.error)) %>%
+                   2 * (median.sigma.error)) |>
     mutate(id = "Subsection", n_sig_test = 50),
 
   calc_sample_size(c(1, 150),
                    alpha_1,
                    power,
-                   2 * (median.sigma.error + median.sigma.subject)) %>%
+                   2 * (median.sigma.error + median.sigma.subject)) |>
     mutate(id = "Condition", n_sig_test = 1),
 
   calc_sample_size(c(1, 150),
                    alpha_1,
                    power,
-                   2 * (median.sigma.error)) %>%
+                   2 * (median.sigma.error)) |>
     mutate(id = "Subsection", n_sig_test = 1)
-) %>%
+) |>
   mutate(comparison = factor(ifelse(id == "Subsection",
                                     comparison_labels[1],
                                     comparison_labels[2]),
@@ -218,10 +218,10 @@ As expected, increasing the multiple-testing burden shifts the curves upward, me
 Another way to interpret the figure above is to ask what size difference would be needed to keep the study near 4 biological replicates under the more stringent correction setting. The table below extracts the point on each 90% true-negative-rate curve nearest that target.
 
 ```{r summarize-four-replicate-threshold}
-df_curves %>% 
-  filter(n_sig_test == "FDR correction, 90% true negative rate") %>% 
-  group_by(comparison) %>% 
-  filter(abs(numSample - 4) == min(abs(numSample - 4))) %>% 
+df_curves |> 
+  filter(n_sig_test == "FDR correction, 90% true negative rate") |> 
+  group_by(comparison) |> 
+  filter(abs(numSample - 4) == min(abs(numSample - 4))) |> 
   mutate(Percent_Change = delta / median_denom_for_pct_delta * 100) |>
   knitr::kable()
 ```

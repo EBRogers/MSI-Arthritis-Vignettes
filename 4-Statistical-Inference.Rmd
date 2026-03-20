@@ -37,12 +37,12 @@ In practice, statistical software will do this translation using the structure o
 
 ## Load required packages
 
-```{r library, results='hide', warning=FALSE, message=FALSE}
+```{r library, include=FALSE, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(Cardinal)
 library(lmerTest)
 library(emmeans)
-source("Utilities.R")
+source(file.path("Utilities.R"))
 
 setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
@@ -58,9 +58,9 @@ Like statistical modeling, we perform statistical testing in Cardinal or externa
 
 
 ```{r load_imzML}
-load("Outputs/meansTest_cartilage_lmer.RData")
+load(file.path("Outputs", "meansTest_cartilage_lmer.RData"))
 
-model_fit_eval <- read_csv("Outputs/feature-model-fit-evaluation.csv", show_col_types = FALSE) |> 
+model_fit_eval <- read_csv(file.path("Outputs", "feature-model-fit-evaluation.csv"), show_col_types = FALSE) |> 
   mutate(across(qq_normality:outliers, as.factor))
 
 passed <- model_fit_eval |> 
@@ -209,7 +209,7 @@ signift_cartilage <- bind_rows(lapply(cartilage_models_OK_fit, FUN = function(m)
   mutate(signif_after_fdr_adj = p_value_fdr < 0.1) |> 
   arrange(p.value)
 
-save(signift_cartilage, file = "Outputs/signift_cartilage.RData")
+save(signift_cartilage, file = file.path("Outputs", "signift_cartilage.RData"))
 
 knitr::kable(head(signift_cartilage))
 ```
@@ -245,7 +245,7 @@ signift_cartilage |>
     legend.position = "bottom"
   )
 
-  ggsave("Recreated-Figures/Figure-Statistical-Inference-Volcano.png", height = 5.75, width = 6, units = "in")
+  ggsave(file.path("Recreated-Figures", "Figure-Statistical-Inference-Volcano.png"), height = 5.75, width = 6, units = "in")
 
 ```
 
@@ -272,7 +272,7 @@ signift_cartilage |>
     strip.background = element_rect(fill = "white", color = "black"),
     strip.text = element_text(face = "bold")
   )
-  ggsave("Recreated-Figures/SI-Figure-Statistical-Inference-PValue-Dists.png", height = 5.75, width = 6, units = "in")
+  ggsave(file.path("Recreated-Figures", "SI-Figure-Statistical-Inference-PValue-Dists.png"), height = 5.75, width = 6, units = "in")
 ```
 
 As the distribution of p-values is neither uniform nor right-skewed, there may be some interdependence between tests, but this is hard to verify with so few tests overall. It would not be surprising were there interdependence however, as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `locfdr` package.
