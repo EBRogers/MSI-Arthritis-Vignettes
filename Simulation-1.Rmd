@@ -18,7 +18,7 @@ local({
 })
 ```
 
-Simulation 1 was designed to evaluate the performance of multivariate clustering methods, speciclaky spatiual shrunken centroids and spatiual K means, for ROI segmentation. We will create images with spatially autocorrelated background noise and clearly defined ROIs. All samples will share a set of features that clearly and consistantly define regions of interest. Then there will be a set of nuisence features, which do not contain the ROI. Finally, there will be 500 features that have a differnetially abundennt effects in the ROIs only. We will then segment the ROIs with two methods and review the results.    
+Simulation 1 was designed to evaluate the performance of multivariate clustering methods, specifically spatial shrunken centroids and spatial K means, for ROI segmentation and its downstream effects on testing for differential abundance. We will create images with spatially autocorrelated background noise and clearly defined ROIs. All samples will share a set of features that clearly and consistently define regions of interest and a set of nuisance features, which do not contain the ROI. Finally, there will be 500 features that have differentially abundant effects in the ROIs only. We will then segment the ROIs with two methods and review the results.
 
 # Load dependencies
 
@@ -39,17 +39,14 @@ setCardinalVerbose(verbose = FALSE)
 
 # Simulation overview
 
-The simulation begins from an existing list of image objects saved as `sim_list_original`. These are the same base images that will be used for Simulation 2, and were simulated using Cardinal's `simulateImage` function.
+The simulation begins with an existing list of image objects saved as `sim_list_original`. These are the same base images that will be used for Simulation 2, and were simulated using Cardinal's `simulateImage` function.
 
 The major ingredients are:
 
 - a shared baseline intensity level
 - feature-specific pixel standard deviations
-- a sample table defining subject, tissue, and condition
-- feature-level effect vectors defining where true signal exists
+- feature-level effects where true signal exists
 - residual variation
-- an oracle ROI used as the reference target
-- two segmentation strategies to compare against the oracle ROI
 
 # Define the baseline image structure
 
@@ -71,7 +68,7 @@ fdx <- MassDataFrame(1:3000)
 fdx$all <- baseline
 ```
 
-This simulation does enforce the assumption that not every pixel will have the same standard deviation, and that standard deviations of pixels are normally distributed. . At small values that is not possible, as sd cannot be negative - thus we will arbitrarily increase values to avoid this. We will also flag very small values for pixel sd.
+This simulation does enforce the assumption that not every pixel will have the same standard deviation, and that standard deviations of pixels are normally distributed. As sd cannot be negative, we will arbitrarily increase values to avoid this. We will also flag very small values for pixel sd.
 
 # Define the sample structure
 
@@ -112,7 +109,7 @@ resid <- sqrt(70)
 ROI_def_delta <- 40
 ```
 
-The simulation then builds feature-wise effect vectors. The condition effect is restricted to the final 500 features, and the ROI-defining features are concentrated in the first 100 features.
+The simulation then builds feature-wise effects, encoded as vectors for use when simulating later.
 
 ```{r effect-vectors}
 set.seed(2024)
@@ -123,16 +120,12 @@ effects_normal <- tibble(
 )
 ```
 
-This is doing several things at once.
-
-First, it makes only a subset of features truly differential. That is necessary if we want to talk meaningfully about both true *and* false positives later.
-
-Second, it separates the features that define the ROI from the features that carry the condition effect. This is to mirror the real world situation that the biological structures (that one might want to segment ROIs of) have features that define them as well as change within them. The methods can use any features of the feature set to draw the ROIs.
+The above code does several things. First, it makes only a subset of features truly differential. That is necessary if we want to talk meaningfully about both true *and* false positives later. Second, it separates the features that define the ROI from the features that carry the condition effect. This is to mirror the real world situation that the biological structures (that one might want to segment ROIs of) have features that define them as well as change within them. The methods can use any features of the feature set to draw the ROIs.
 
 
 # Generate residual variation
 
-The script next generates a sample-by-feature residual variation matrix.
+We next generate a sample-by-feature residual variation matrix.
 
 ```{r variance-matrices}
 set.seed(2026)
@@ -140,7 +133,7 @@ residual_mat <- matrix(rnorm(16 * nrow(effects_normal), sd = resid), nrow = 16)
 residual_mat <- scale(residual_mat, center = TRUE, scale = FALSE)
 ```
 
-This keeps the active simulation relatively easy to interpret: the feature-level fixed effects determine where signal should appear, while `residual_mat` controls how much those means fluctuate from sample to sample.
+This keeps the active simulation relatively easy to interpret: the feature-level fixed effects determine where signal should appear, while `residual_mat` controls how much those means fluctuate from sample to sample. We will scale this matrix so its center is zero, thus enforcing the assumption that residual variation does not systemically bias the effect up or down.
 
 # Construct the target mean structures
 
@@ -176,7 +169,7 @@ for (eff in c(effects_matrix_bg,
 }
 ```
 
-Negative means would be inconsistent with real world MSI images.
+Negative means would be inconsistent with real world MSI data.
 
 # Build the oracle ROI into each image
 
@@ -226,9 +219,7 @@ sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i) {
 
 # Segment the simulated images with two methods
 
-The script then applies two unsupervised segmentation methods.
-
-The first is spatial shrunken centroids (SSC), using multiple regularization values. The second is spatial k-means (SKM), using seven clusters. Both are run separately on each simulated image.
+Now we shall segment the images using the techniques mentioned above. We used iterative testing to determine the ideal number of clusters, and for spatial shrunken centroids (SSC), the range of the regularization parameter. SSC used 4 clusters with multiple regularization values. The second is spatial k-means (SKM), using seven clusters. Both are run separately on each simulated image. This process is computationally intensive. Adjust the BPPARAMs accordingly.
 
 ```{r run-segmentation, message=FALSE, warning=FALSE}
 sscl <- bplapply(sim_list_adj, FUN = function(m) {
@@ -242,11 +233,11 @@ skml_7c <- bplapply(sim_list_adj, FUN = function(m) {
 }, BPPARAM = SnowfastParam(8))
 ```
 
-These parameter choices are part of what the simulation is actually testing. The oracle ROI is known, so segmentation quality can be evaluated after the fact. SSC and SKM are not being used here as discovery tools in the usual sense; they are being benchmarked against a known target.
-
 # Extract ROI summaries for modeling
 
 After segmentation, helper functions from `SimulationUtilities.R` identify the ROI candidates, select representative clusters, and extract feature summaries for modeling.
+
+`analyze_spatial_clusters` and `analyze_spatial_clusters_skm` take the results generated from above, score the clusters against an “oracle” ROI annotation in each simulation, and then select the best-matching ROI-like cluster from each simulation—keeping only the top n_top_per_condition simulations per condition based on that score. The scoring process is mean to make this simulation rigorous and to somewhat reproduce the input of the experimenter. The exact boundaries of the ROI are unknown, but the experimenter has an idea of what it should look like - the donut. Thus, segmentation results that most conform to that are chosen.
 
 ```{r analyze-segmentation-results}
 results_list <- analyze_spatial_clusters(
@@ -266,8 +257,6 @@ results_list_skm_7c <- analyze_spatial_clusters_skm(
 )
 ```
 
-These helper functions are doing a substantial amount of work. They bridge the gap between unsupervised segmentation output and a modeling-ready data frame. That is an important practical step, because in an actual analysis one never tests the clustering object directly. One tests summaries extracted from the ROI implied by that clustering.
-
 # Fit the downstream models
 
 The simulation compares three ROI definitions:
@@ -276,7 +265,7 @@ The simulation compares three ROI definitions:
 - the ROI recovered by spatial k-means
 - the oracle donut ROI
 
-For each, the code extracts feature-level ROI means and fits condition-only models.
+For each, the code extracts feature-level ROI means and fits condition-only models. `extract_data_for_modeling_alt` pulls the intensity means out from the ROIs selected above, formatting them with the sample metadata for modeling. `run_models_no_me` runs standard linear regression models (without mixed effects) using `lm`. For a design this simple with one categorical independent variable and a continuous dependent variable, these models are equivalent to an ANOVA.
 
 ```{r fit-models, results='hide', message=FALSE, warning=FALSE}
 mse_frame_to_test <- extract_data_for_modeling_alt(
@@ -308,11 +297,9 @@ run_models_to_test_skm_roi_7c <- run_models_no_me(
 )
 ```
 
-The formula choice is intentionally simple. Once the ROI summaries have been constructed, the question is whether the recovered ROI yields the expected condition effect. By keeping the downstream model straightforward, the script places the burden of performance on the ROI definition itself.
-
 # Compare which samples were selected for figures
 
-The script next finds treatment and control examples that were identified by both SSC and SKM, then uses them for visualization.
+The section below finds treatment and control examples that were identified by both SSC and SKM, then uses them for visualization.
 
 ```{r identify-charting-samples}
 trt_sample_id <- intersect(
@@ -327,11 +314,11 @@ control_sample_id <- intersect(
 
 ```
 
-This is a practical decision rather than a modeling decision. By choosing samples that are usable across both methods, the resulting figures remain directly comparable.
-
 # Visualize the simulated images and ROI definitions
 
-The original simulation script writes several Cardinal image panels to disk to show the ROI-defining features, a null feature, a truly differential feature, and the oracle and recovered segmentations. Those images are helpful context, so here we display the same comparisons inline while also saving them.
+Let's visualize the simulated images, so we can get a better idea of what everything looks like.
+
+### Example of ROI defining features, shared by both conditions
 
 ```{r contextual-simulation-images, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
 
@@ -376,7 +363,11 @@ save_cardinal_plot(
   )
 )
 ground_truth_roi_defining_plot
+```
 
+### Example of features without condition effects or ROIs, shared by both conditions
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
 ground_truth_no_effect_plot <- image(
   m_context,
   i = c(1000),
@@ -407,7 +398,11 @@ save_cardinal_plot(
   )
 )
 ground_truth_no_effect_plot
+```
 
+### Example of differential abundant features where the effect differs by conditions
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
 ground_truth_diff_abun_plot <- image(
   m_context,
   i = c(2700),
@@ -438,7 +433,11 @@ save_cardinal_plot(
   )
 )
 ground_truth_diff_abun_plot
+```
 
+### The true ROI, shared by both conditions
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
 oracle_segmentation_plot <- image(
   m_context,
   "circle_2",
@@ -469,7 +468,11 @@ save_cardinal_plot(
   )
 )
 oracle_segmentation_plot
+```
 
+### Example of ROIs defined by SSC
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
 m_ssc_context <- cbind(
   results_list[[2]][[which(results_list[[3]]$id == control_sample_id)]],
   results_list[[2]][[which(results_list[[3]]$id == trt_sample_id)]]
@@ -505,7 +508,11 @@ save_cardinal_plot(
   )
 )
 ssc_segmentation_plot
+```
 
+### Example of ROIs defined by SKM
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
 m_skm_context <- cbind(
   results_list_skm_7c[[2]][[which(results_list_skm_7c[[3]]$id == control_sample_id)]],
   results_list_skm_7c[[2]][[which(results_list_skm_7c[[3]]$id == trt_sample_id)]]
@@ -543,9 +550,119 @@ save_cardinal_plot(
 skm_segmentation_plot
 ```
 
+# Do the same features drive segmentation across samples?
+
+Multivariate segmentation methods, such as SSC and SKM, seek to explain variation between features using spatial segments. Biological structures often explain substantial variation within MSI samples; thus, we might assume that the features that drive the results of the segmentation algorithms are also shared across samples.
+
+That assumption, at least within the bounds of our simulation, is incorrect. Below we generate Venn diagrams showing the overlap of different feature sets with the features driving segmentation.
+
+### Do the ROI-defining features drive SSC segmentation?
+
+The ROI-defining features (the first 100) are common to all the simulated images and clearly delineate the donut-shaped ROI. However, for images from both conditions, the ROI-defining features do not substantially drive ROI segmentation.
+
+
+```{r overlap-diagnostics, fig.width=8, fig.height=8, results='hide', message=FALSE, warning=FALSE}
+library(VennDiagram)
+library(RColorBrewer)
+
+ssc_control_charting_sample <- sscl[[which(samples$id == control_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == control_sample_id)]]$ssc_index]]
+ssc_trt_charting_sample <- sscl[[which(samples$id == trt_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == trt_sample_id)]]$ssc_index]]
+
+ssc_venn_roidiff_args <- list(
+  x = list(topFeatures(ssc_control_charting_sample, n = 100)$i,
+           topFeatures(ssc_trt_charting_sample, n = 100)$i,
+           1:100),
+  category.names = c("Top 100 Features\nfrom a control (Cond B) image",
+                     "Top 100 Features\nfrom a treatment (Cond A) image",
+                     "True 100 ROI-defining features"),
+  disable.logging = TRUE,
+  imagetype = "png",
+  height = 1000,
+  width = 1000,
+  resolution = 300,
+  compression = "lzw",
+  pointsize = 18,
+  lwd = 2,
+  lty = "blank",
+  fill = brewer.pal(3, "Pastel2"),
+  euler.d = TRUE,
+  sep.dist = 2,
+  fontfamily = "sans",
+  cat.cex = 0.6,
+  cat.fontfamily = "sans",
+  margin = 0.1
+)
+
+ssc_venn_roidiff_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-ROI-Def-Shared-Features.png")
+do.call(
+  venn.diagram,
+  c(
+    ssc_venn_roidiff_args,
+    list(
+      filename = ssc_venn_roidiff_file,
+      output = TRUE
+    )
+  )
+)
+knitr::include_graphics(ssc_venn_roidiff_file)
+```
+
+The same, but for SKM.
+
+```{r, fig.width=8, fig.height=8, results='hide', message=FALSE, warning=FALSE}
+skm_venn_roidef_args <- list(
+  x = list(topFeatures(skm_control_charting_sample, n = 100)$i,
+           topFeatures(skm_trt_charting_sample, n = 100)$i,
+           1:100),
+  category.names = c("Top 100 Features\nfrom a control (cond B) image",
+                     "Top 100 Features\nfrom a treatment (cond A) image",
+                     "True differentiating features"),
+  disable.logging = TRUE,
+  imagetype = "png",
+  height = 1000,
+  width = 1000,
+  resolution = 300,
+  compression = "lzw",
+  pointsize = 18,
+  lwd = 2,
+  lty = "blank",
+  fill = brewer.pal(3, "Pastel2"),
+  euler.d = TRUE,
+  sep.dist = 2,
+  fontfamily = "sans",
+  cat.cex = 0.6,
+  cat.fontfamily = "sans",
+  margin = 0.1
+)
+
+skm_venn_roidef_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-ROI-Def-Shared-Features.png")
+do.call(
+  venn.diagram,
+  c(
+    skm_venn_roidef_args,
+    list(
+      filename = skm_venn_roidef_file,
+      output = TRUE
+    )
+  )
+)
+knitr::include_graphics(skm_venn_roidef_file)
+```
+
+
 # Evaluate true and false findings
 
-The most important summaries in the script are the accuracy calculations. Since the last 500 features were assigned the condition effect, the script can treat `feature_id > 2500` as the truth set for differential abundance.
+Visual evaluations of the ROIs defined by SSC and SKM clearly indicate these methods perform poorly in this context: many features, some of which define homogeneous ROIs consistently, some of which vary by condition, and all of which experience spatially correlated noise.
+
+We could conclude here, safe in the knowledge that because they have been drawn poorly, the downstream testing for differential abundance will yield poor results. However, the effects of multivariate segmentation are not relegated solely to poor clustering. Fundamentally, we are using the same numeric values (intensity values of pixels for each feature) to draw ROIs in each sample and then, after summarizing intensities within each ROI, to model and test for differential abundance between conditions. This reuse of information is called data leakage, but is better understood as confounding or selection bias in this specific scenario.
+
+Let's think through why, and how it will affect the results of statistical testing. The purpose of SKM and SSC is to explain variation in feature intensity by creating clusters of pixels that are similar across features. Let's pretend we have a set of MSI samples that only have a single feature. When we segment them with our algorithms, we set a number of clusters. High-intensity pixels are in one segment and low-intensity pixels in another, with other clusters in the middle and drawn with some awareness of how close the pixels are together. Now let's say that the single variable, condition, systematically decreases abundance in diseased samples (or increases it; the thought experiment works the same way, just flipped). How will that affect segmentation? Depending on the algorithm, the high-intensity cluster may have fewer pixels but the same mean. Or it may have the same pixels, meaning that the means of the other clusters will change as well. It may segment new or different patterns than before.
+
+If the goal of our analysis is to explore the morphological changes between samples, then the differences in ROI presentation between conditions are somewhat informative. But if we are trying to compare differential abundance using that single feature, we have now confounded our results. The segmentation with the single feature now becomes a selection bias we have applied to the sample of pixels we are trying to model. Its behavior is now erratic: it could overfit to noise, absorb true signal (as is the case in this simulation), or do nothing. Regardless, we do not know, and thus the error rates of our test (false positive, false negative) are no longer reliable.
+
+In reality, we have many features; thus, the impact of any individual feature on ROI boundaries is minimal. But with all of our features comes tremendous spatial noise, further obfuscating the true ROI, and in cases where spatial noise is shared between features, as is partially the case here, increasing the risk of overfitting to that noise.
+
+Let us explore this below. First, we will conduct t-tests on mean abundance in ROIs between conditions, correcting for multiple testing using the FDR. Then we will compute the error rates.
 
 ```{r accuracy-summaries}
 res_labels <- tibble(
@@ -592,11 +709,12 @@ accuracy_frame_oracle
 accuracy_frame_skm
 ```
 
-This is the payoff of the simulation. Because the truth is known, the downstream analysis can be evaluated in terms that are usually unavailable in real MSI data. We can ask not only whether a method finds signal, but whether it finds the correct signal and how much spurious discovery it produces.
+As we can see, tests for differential abundance between ROIs segmented with SSC and SKM are much less sensitive.
+
 
 # Volcano-style comparison across methods
 
-The script also combines the model outputs into a shared plotting frame and colors findings by whether they are true positives, false positives, or non-significant.
+Let's visualize the volcano plots to get a sense of the performance. 
 
 ```{r volcano-comparison, fig.width=10, fig.height=6}
 bind_rows(
@@ -655,187 +773,3 @@ bind_rows(
 
 ggsave(file.path("Recreated-Figures","SI-Figure-Simualtion-1-ROI-Volcano-Plots.png"), height = 5, width = 8, units = "in")
 ```
-
-This plot is especially useful because it separates two ideas that often get conflated: effect-size estimation and statistical significance. A segmentation method may recover a roughly correct ROI boundary yet still distort the estimated effect sizes or significance pattern.
-
-# Feature-overlap diagnostics
-
-The script concludes with Venn diagrams comparing top-ranked features from selected SSC and SKM segmentations to the true differentiating feature set. I view these as supporting diagnostics rather than the primary result, but they are still informative because they show whether the methods are prioritizing the same mass features as the truth set.
-
-```{r overlap-diagnostics, fig.width=8, fig.height=8, results='hide', message=FALSE, warning=FALSE}
-library(VennDiagram)
-library(RColorBrewer)
-
-ssc_control_charting_sample <- sscl[[which(samples$id == control_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == control_sample_id)]]$ssc_index]]
-ssc_trt_charting_sample <- sscl[[which(samples$id == trt_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == trt_sample_id)]]$ssc_index]]
-
-ssc_venn_args <- list(
-  x = list(topFeatures(ssc_control_charting_sample, n = 500)$i,
-           topFeatures(ssc_trt_charting_sample, n = 500)$i,
-           2501:3000),
-  category.names = c("Top 500 Features\nfrom a control (Cond B) image",
-                     "Top 500 Features\nfrom a treatment (Cond A) image",
-                     "True differentiating features"),
-  disable.logging = TRUE,
-  imagetype = "png",
-  height = 1000,
-  width = 1000,
-  resolution = 300,
-  compression = "lzw",
-  pointsize = 18,
-  lwd = 2,
-  lty = "blank",
-  fill = brewer.pal(3, "Pastel2"),
-  euler.d = TRUE,
-  sep.dist = 2,
-  fontfamily = "sans",
-  cat.cex = 0.6,
-  cat.fontfamily = "sans",
-  margin = 0.1
-)
-
-ssc_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-Diff-Abun-Shared-Features.png")
-do.call(
-  venn.diagram,
-  c(
-    ssc_venn_args,
-    list(
-      filename = ssc_venn_file,
-      output = TRUE
-    )
-  )
-)
-knitr::include_graphics(ssc_venn_file)
-
-
-ssc_venn_roidiff_args <- list(
-  x = list(topFeatures(ssc_control_charting_sample, n = 100)$i,
-           topFeatures(ssc_trt_charting_sample, n = 100)$i,
-           1:100),
-  category.names = c("Top 100 Features\nfrom a control (Cond B) image",
-                     "Top 100 Features\nfrom a treatment (Cond A) image",
-                     "True 100 ROI-defining features"),
-  disable.logging = TRUE,
-  imagetype = "png",
-  height = 1000,
-  width = 1000,
-  resolution = 300,
-  compression = "lzw",
-  pointsize = 18,
-  lwd = 2,
-  lty = "blank",
-  fill = brewer.pal(3, "Pastel2"),
-  euler.d = TRUE,
-  sep.dist = 2,
-  fontfamily = "sans",
-  cat.cex = 0.6,
-  cat.fontfamily = "sans",
-  margin = 0.1
-)
-
-ssc_venn_roidiff_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-ROI-Def-Shared-Features.png")
-do.call(
-  venn.diagram,
-  c(
-    ssc_venn_roidiff_args,
-    list(
-      filename = ssc_venn_roidiff_file,
-      output = TRUE
-    )
-  )
-)
-knitr::include_graphics(ssc_venn_roidiff_file)
-
-skm_control_charting_sample <- skml_7c[[which(samples$id == control_sample_id)]]
-skm_trt_charting_sample <- skml_7c[[which(samples$id == trt_sample_id)]]
-
-skm_venn_args <- list(
-  x = list(topFeatures(skm_control_charting_sample, n = 500)$i,
-           topFeatures(skm_trt_charting_sample, n = 500)$i,
-           2501:3000),
-  category.names = c("Top 500 Features\nfrom a control (cond B) image",
-                     "Top 500 Features\nfrom a treatment (cond A) image",
-                     "True differentiating features"),
-  disable.logging = TRUE,
-  imagetype = "png",
-  height = 1000,
-  width = 1000,
-  resolution = 300,
-  compression = "lzw",
-  pointsize = 18,
-  lwd = 2,
-  lty = "blank",
-  fill = brewer.pal(3, "Pastel2"),
-  euler.d = TRUE,
-  sep.dist = 2,
-  fontfamily = "sans",
-  cat.cex = 0.6,
-  cat.fontfamily = "sans",
-  margin = 0.1
-)
-
-skm_venn_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-Diff-Abun-Shared-Features.png")
-do.call(
-  venn.diagram,
-  c(
-    skm_venn_args,
-    list(
-      filename = skm_venn_file,
-      output = TRUE
-    )
-  )
-)
-knitr::include_graphics(skm_venn_file)
-
-
-
-skm_venn_roidef_args <- list(
-  x = list(topFeatures(skm_control_charting_sample, n = 100)$i,
-           topFeatures(skm_trt_charting_sample, n = 100)$i,
-           1:100),
-  category.names = c("Top 100 Features\nfrom a control (cond B) image",
-                     "Top 100 Features\nfrom a treatment (cond A) image",
-                     "True differentiating features"),
-  disable.logging = TRUE,
-  imagetype = "png",
-  height = 1000,
-  width = 1000,
-  resolution = 300,
-  compression = "lzw",
-  pointsize = 18,
-  lwd = 2,
-  lty = "blank",
-  fill = brewer.pal(3, "Pastel2"),
-  euler.d = TRUE,
-  sep.dist = 2,
-  fontfamily = "sans",
-  cat.cex = 0.6,
-  cat.fontfamily = "sans",
-  margin = 0.1
-)
-
-skm_venn_roidef_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-ROI-Def-Shared-Features.png")
-do.call(
-  venn.diagram,
-  c(
-    skm_venn_roidef_args,
-    list(
-      filename = skm_venn_roidef_file,
-      output = TRUE
-    )
-  )
-)
-knitr::include_graphics(skm_venn_roidef_file)
-```
-
-# Interpretation
-
-This simulation is useful because it separates three pieces of the analysis that are intertwined in real data.
-
-First, it defines a known spatial ROI. That gives us a benchmark for whether a segmentation method is recovering the intended region.
-
-Second, it defines a known set of truly differential features. That gives us a benchmark for inference, including false discovery behavior.
-
-Third, it passes the data through the same style of workflow used in the rest of the project: segmentation, ROI summarization, and feature-wise modeling. That makes the results more informative than a purely abstract simulation.
-
-The main limitation is that the simulation still reflects the assumptions built into its construction. The ROI shape is regular and the effect sizes are prespecified. That is not a flaw so much as a reminder that this simulation is best interpreted as a targeted stress test of the workflow, not as a complete generative model of biological MSI data.
