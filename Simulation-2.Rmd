@@ -19,6 +19,9 @@ local({
 })
 ```
 
+# Simulation overview
+
+Simulation 2 was designed to evaluate 1) the effect of the predominant source of variance (subject or residual), and 2) the use of pixels as replicates, on error rates of tests from different model specifications. We start from the same base image objects and impose known feature-level effects, subject-level variation, and residual variation. We then model abundance, either as sample means or using pixels as replicates, before comparing false and true positive rates.
 
 # Load dependencies
 
@@ -42,13 +45,9 @@ source("SimulationUtilities.R")
 setCardinalVerbose(verbose = FALSE)
 ```
 
-# Simulation overview
-
-The simulation begins from an existing list of image objects saved as `sim_list_original`. These are the same base images that were used for Simulation 1, and were simulated using Cardinal's `simulateImage` function.
-
 # Define the base image and sample structure
 
-We first define the baseline intensity level, a constant target pixel standard deviation, and the sample design. The design mirrors the rest of the project: eight subjects, two subtissues, and two conditions.
+We first define the baseline intensity level, a constant target pixel standard deviation, and the sample design. The simulation uses 16 samples, corresponding to 8 subjects crossed with a binary tissue indicator and a binary condition indicator. Each subject has 2 tissues, but only 1 condition.
 
 ```{r base-setup}
 baseline <- 50
@@ -61,18 +60,17 @@ fdx$all <- baseline
 
 samples <- data.frame(
   subject = c(1:8, 1:8),
-  subtissue = c(rep(0, 8), rep(1, 8)),
+  tissue = c(rep(0, 8), rep(1, 8)),
   condition = c(rep(0, 4), rep(1, 4), rep(0, 4), rep(1, 4))
-) %>%
-  mutate(id = paste0(subject, "_", subtissue, "_", condition))
+) |>
+  mutate(id = paste0(subject, "_", tissue, "_", condition))
 
 knitr::kable(samples)
 ```
 
-
 # Load the starting image objects
 
-We will now load the base images. The base images can be generated with the code that has been commented out as well. 
+The base images can be regenerated with the commented code below, but it is very time-consuming. We will simply load the images from the RData object supplied.
 
 ```{r load-simulation-base}
 
@@ -97,7 +95,7 @@ We will now load the base images. The base images can be generated with the code
 # 
 # save(sim_list_original, file = "sim_list_original.RData")
 
-sim_list_original_path <- "Simulation-Data/sim_list_original.RData"
+sim_list_original_path <- file.path("Simulation-Data", "sim_list_original.RData")
 stopifnot(file.exists(sim_list_original_path))
 load(sim_list_original_path)
 stopifnot(exists("sim_list_original"))
@@ -107,7 +105,11 @@ length(sim_list_original)
 
 # Define the feature-level effects and variance components
 
-The next block encodes the main simulation assumptions. The value `delta` controls the size of the fixed effect, `gamma` controls a subject-level random component, and `resid` controls sample-level residual variation.
+The next block is where the main simulation assumptions are encoded. We specify:
+
+- `delta`, the magnitude of the fixed tissue and condition effects
+- `gamma`, the scale of the subject-level random component
+- `resid`, the scale of the sample-level residual variation
 
 ```{r effect-parameters}
 delta <- 15
@@ -116,16 +118,19 @@ resid <- sqrt(120)
 
 effects <- tibble(
   mz = mz(sim_list_original[[1]]),
-  subtissue = c(rep(0, 1500), rep(delta, 1500)),
+  tissue = c(rep(0, 1500), rep(delta, 1500)),
   condition = c(rep(0, 1500), rep(delta, 1500))
 )
 
 knitr::kable(head(effects, 8))
 ```
 
-This means the first 1500 features are null for both modeled effects and the final 1500 features carry both a subtissue effect and a condition effect. The purpose is not to mimic every detail of real MSI data. The purpose is to create a clean truth set that can later be used to quantify true positives and false positives.
+The first 1500 features will not have nonzero fixed effects for tissue or condition.
 
-The script then generates random variation at two levels. First, `gamma_mat` creates a centered subject-level contribution. Second, `residual_mat` creates centered sample-level noise.
+We will make the effect of tissue and condition 0 for the first 1500 features, then 15 each for the last 1500. By generating features that do and do not have effects for the independent variables, we can quantify both true and false positive rates.
+
+The script then generates two sources of random variation, both of which are centered at zero to enforce the modeling assumption that sources of random error are not systematically biased. This will preserve the intended baseline and fixed-effect interpretation on average.
+
 
 ```{r variance-components}
 set.seed(2025)
@@ -142,15 +147,13 @@ dim(gamma_mat)
 dim(residual_mat)
 ```
 
-Centering matters here. It prevents the random components from inducing a systematic overall shift and helps preserve the intended baseline and fixed-effect interpretation on average.
-
 # Construct the target mean structures
 
 The fixed effects and random components are then combined into a sample-by-feature matrix of target means.
 
 ```{r target-mean-matrix}
 effects_matrix <- sapply(1:16, function(i) {
-  samples[[i, "subtissue"]] * effects$subtissue +
+  samples[[i, "tissue"]] * effects$tissue +
     samples[[i, "condition"]] * effects$condition +
     gamma_mat[i, ] +
     residual_mat[i, ] +
@@ -160,16 +163,13 @@ effects_matrix <- sapply(1:16, function(i) {
 if (any(effects_matrix < 0)) {
   stop("Some effects have negative means. Increase baseline.")
 }
-
-dim(effects_matrix)
-summary(as.vector(effects_matrix))
 ```
 
-The non-negativity check is small but important. The later rescaling assumes a nonnegative intensity scale, so the script stops early if the chosen settings produce impossible mean values.
+MSI abundance can't be negative, so we check to ensure this is correct. This is technically an oversimplification of our simulation: it enforces the assumption that variation in each feature is independent of intensity (i.e., the random components that make up the intensity of a specific feature for each pixel are normally distributed and symmetric, even when intensity is close to zero). In reality, intensity-dependent missingness means that assumption likely does not hold near zero. To ease this, we boosted the baseline, avoiding the issue for now.
 
 # Build the simulated images
 
-The next block overwrites each starting image so that its feature intensities match the target means while sharing a common pixel-level standard deviation. Each image is then summarized feature-wise to create a modeling-ready data frame.
+The next step applies the target intensity to each feature, preserving the spatial autocorrelation of pixels within each feature. We are directly modeling ROIs, so there is no need to define them.
 
 ```{r build-simulated-images, results='hide', message=FALSE, warning=FALSE}
 sim_list_adj <- list()
@@ -191,9 +191,11 @@ for (i in 1:length(sim_list_original)) {
 mse_frame_sim_list <- extract_data_for_modeling_alt(sim_list_adj, samples)
 ```
 
-At this point the simulation has created one summary value per sample and feature. That is the starting point for the first major analysis strategy.
+The last step takes the mean pixel intensity for each feature. At this point the simulation has created one summary value per sample and feature.
 
-To keep the simulation concrete, it is helpful to look at representative null and affected features. Feature `1000` lies in the null half of the spectrum, whereas feature `2500` lies in the affected half.
+# Visualize representative simulated features
+
+Before fitting models, it is useful to inspect two representative features. To keep the simulation concrete, it is helpful to look at representative unaffected and affected features. Feature `1000` lies in the null half of the spectrum where condition and tissue have no relationship with intensity, whereas feature `2500` lies in the half of features where intensity is affected by condition and tissue.
 
 ```{r representative-simulation-images, fig.width=8, fig.height=4, message=FALSE, warning=FALSE}
 m_context <- cbind(sim_list_adj[[1]], sim_list_adj[[12]])
@@ -213,75 +215,81 @@ image(
 )
 ```
 
-# Subsection A: Means as the analysis unit
+# Means as the analysis unit
 
-The first analysis treats each summarized image as the observational unit. This is the natural analog of ROI-level analysis, where each sample contributes a single summary per feature. That choice preserves the biological design: the number of effective replicates is driven by the number of samples, not the number of pixels.
+The first analysis treats each summarized image as the observational unit, summarizing with means.
 
 ## Fit mixed-effects models to summarized means
 
-The script fits the same mixed-effects model to every feature, using fixed effects for `subtissue`, `condition`, and their interaction, plus a random intercept for subject.
+The script fits the same mixed-effects model to every feature with `lme4::lmer`, using fixed effects for `tissue`, `condition`, and their interaction, plus a random intercept for subject. 
 
 ```{r fit-means-models, results='hide', message=FALSE, warning=FALSE}
 run_models_sim_list <- run_models_MEMORY_EFF(
   mse_frame_sim_list,
-  formu = "mean ~ subtissue * condition + (1|subject)"
+  formu = "mean ~ tissue * condition + (1|subject)"
 )
 ```
 
-This is the core inferential engine for the rest of the simulation. The next goal is to find features with different variance regimes according to the fitted models.
 
 ## Classify features by variance structure
 
-The script extracts ICC values and decomposes total variance into an implied subject-level component and an implied technical component.
+This chunk extracts intraclass correlation coefficient (ICC) values and decomposes total variance into an implied subject-level component and an implied technical component. 
 
 ```{r classify-features-by-variation}
-feature_models_results_for_each_combo <- run_models_sim_list[[2]] %>%
+feature_models_results_for_each_combo <- run_models_sim_list[[2]] |>
   mutate(
     sub_var = total_var * icc,
     tech_var = total_var * (1 - icc),
     eff = as.numeric(feature_id) > 1500
-  ) %>%
-  dplyr::select(feature_id, icc, eff, total_var, sub_var, tech_var) %>%
-  filter(icc > 0 & icc < 1 & total_var > 40 & total_var < 505) %>%
-  group_by(eff, icc_group = icc < 0.5) %>%
+  ) |>
+  dplyr::select(feature_id, icc, eff, total_var, sub_var, tech_var) |>
+  filter(icc > 0 & icc < 1 & total_var > 40 & total_var < 505) |>
+  group_by(eff, icc_group = icc < 0.5) |>
   mutate(
     target_icc = if_else(icc_group, 0.25, 0.75),
     distance = abs(icc - target_icc)
-  ) %>%
-  arrange(eff, icc_group, distance) %>%
-  group_by(eff, icc_group) %>%
-  slice_head(n = 150) %>%
-  mutate(icc_label = if_else(icc_group, "low icc", "high icc")) %>%
+  ) |>
+  arrange(eff, icc_group, distance) |>
+  group_by(eff, icc_group) |>
+  slice_head(n = 150) |>
+  mutate(icc_label = if_else(icc_group, "low icc", "high icc")) |>
   ungroup()
 
-feature_models_results_for_each_combo %>%
-  group_by(eff, icc_label) %>%
+feature_models_results_for_each_combo |>
+  group_by(eff, icc_label) |>
   summarise(
     median_icc = median(icc),
     median_total = median(sub_var + tech_var),
     median_tech = median(tech_var),
     median_sub = median(sub_var),
     .groups = "drop"
-  ) %>%
+  ) |>
   knitr::kable()
 ```
 
-This is one of the most important steps in the simulation. It does not merely split features into null and non-null groups. It further selects subsets of those features that are close to low-ICC and high-ICC targets. That gives the later comparisons a cleaner interpretation: we are contrasting inference when the same truth status is paired with different variance structures.
+The distributions below provide useful context for the selected features.
 
-The distributions below provide useful context for those selected features.
-
+### Total variance
 ```{r variation-distributions, fig.width=8, fig.height=8}
-feature_models_results_for_each_combo %>%
+feature_models_results_for_each_combo |>
   ggplot(aes(x = total_var, fill = icc_label)) +
   geom_histogram(position = "identity", bins = 50, alpha = 0.4) +
   theme_classic()
+```
 
-feature_models_results_for_each_combo %>%
+### Residual/Technical variance
+
+```{r, fig.width=8, fig.height=8}
+feature_models_results_for_each_combo |>
   ggplot(aes(x = tech_var, fill = icc_label)) +
   geom_histogram(position = "identity", bins = 50, alpha = 0.4) +
   theme_classic()
+```
 
-feature_models_results_for_each_combo %>%
+### Subject/Biological variance
+
+```{r, fig.width=8, fig.height=8}
+feature_models_results_for_each_combo |>
   ggplot(aes(x = sub_var, fill = icc_label)) +
   geom_histogram(position = "identity", bins = 50, alpha = 0.4) +
   theme_classic()
@@ -289,37 +297,46 @@ feature_models_results_for_each_combo %>%
 
 ## Construct the comparison subsets
 
-The script next builds two feature subsets: one with lower ICC and one with higher ICC. Each subset contains both null and non-null features, ordered by feature index so that later accuracy calculations can use the same truth convention.
+In practice, with many layered sources of error and the complexity of parameter estimators like REML, it is simpler to fit more models than necessary then choose a subset with the desired breakdown of amount and predominant variance (subject vs residual). We do that here using the ICC, building sets with higher residual/technical variation than subject/biological variation and vice versa. Each subset contains features with and without condition and tissue effects, ordered by feature index so that later accuracy calculations can use the same truth convention.
 
 ```{r construct-means-subsets, results='hide'}
 n_each <- 150
 
-feature_ids_for_lowb_hight <- feature_models_results_for_each_combo %>%
-  filter(icc_label == "low icc") %>%
-  arrange(feature_id) %>%
+feature_ids_for_lowb_hight <- feature_models_results_for_each_combo |>
+  filter(icc_label == "low icc") |>
+  arrange(feature_id) |>
   pull(feature_id)
 
-j_frame_lowb_hight <- mse_frame_sim_list %>%
+j_frame_lowb_hight <- mse_frame_sim_list |>
   filter(feature_id %in% feature_ids_for_lowb_hight)
 
-run_models_lowb_hight <- run_models_sim_list[[1]][feature_models_results_for_each_combo %>%
-  filter(icc_label == "low icc") %>%
-  arrange(feature_id) %>%
+run_models_lowb_hight <- run_models_sim_list[[1]][feature_models_results_for_each_combo |>
+  filter(icc_label == "low icc") |>
+  arrange(feature_id) |>
   pull(feature_id)]
 
-feature_ids_for_highb_lowt <- feature_models_results_for_each_combo %>%
-  filter(icc_label == "high icc") %>%
-  arrange(feature_id) %>%
+feature_ids_for_highb_lowt <- feature_models_results_for_each_combo |>
+  filter(icc_label == "high icc") |>
+  arrange(feature_id) |>
   pull(feature_id)
 
-j_frame_highb_lowt <- mse_frame_sim_list %>%
+j_frame_highb_lowt <- mse_frame_sim_list |>
   filter(feature_id %in% feature_ids_for_highb_lowt)
 
-run_models_highb_lowt <- run_models_sim_list[[1]][feature_models_results_for_each_combo %>%
-  filter(icc_label == "high icc") %>%
-  arrange(feature_id) %>%
+run_models_highb_lowt <- run_models_sim_list[[1]][feature_models_results_for_each_combo |>
+  filter(icc_label == "high icc") |>
+  arrange(feature_id) |>
   pull(feature_id)]
+```
 
+In the chunk below, `get_comparison_plotting_frame()` takes a simulated long-format dataset plus the per-feature mixed-effects models we already fit and:
+
+1. runs simple per-feature t‑tests (either two sample or paired) for between subjects (control vs OA within medial) and within subjects (lateral vs medial within OA) hypotheses
+2. runs the same hypotheses tests using the estimates from the mixed-models (pairwise via emmeans), essentially testing the same hypotheses as the t-tests but with estimates that use all the data and more complex model specifications
+3. marks each feature as significant or not,
+4. then classifies each result as a true/false positive/negative and returns counts by model/test/term
+
+```{r}
 tests_lowb_hight <- get_comparison_plotting_frame(
   j_frame_lowb_hight,
   run_models_lowb_hight,
@@ -333,22 +350,20 @@ tests_highb_lowt <- get_comparison_plotting_frame(
 )
 ```
 
-The variable names in the original script are a bit idiosyncratic, but the conceptual split is clear: one branch emphasizes greater technical variation and the other emphasizes greater biological variation.
+## Comparing true and false positive rates of model specifications under conditions of high technical/residual or subject/biological variance
 
-## Build the main means-based comparison figure
+For model specifications, see Table 1 of the manuscript. 
 
-The code below reproduces the paper-style comparison figure for the summarized-means analysis. It contrasts how often each testing strategy produces true positives and false positives under the two variance regimes.
-
-```{r means-comparison-figure, fig.width=11.5, fig.height=10, message=FALSE, warning=FALSE}
+```{r means-comparison-figure, fig.width=11.5, fig.height=10, message=FALSE, warning=FALSE, echo = FALSE}
 top_labs <- c("Greater Technical Variation",
               "Greater Biological Variation")
 
 add_zero_tests <- function(tests_df, nmax = 150) {
-  if (nrow(tests_df %>% filter(n == nmax & finding %in% c("False Positive", "True Negative"))) > 0) {
+  if (nrow(tests_df |> filter(n == nmax & finding %in% c("False Positive", "True Negative"))) > 0) {
     tests_df <- bind_rows(
       tests_df,
-      tests_df %>%
-        filter(n == nmax & finding %in% c("False Positive", "True Negative")) %>%
+      tests_df |>
+        filter(n == nmax & finding %in% c("False Positive", "True Negative")) |>
         mutate(
           finding = ifelse(finding == "False Positive", "True Negative", "False Positive"),
           n = 0
@@ -356,11 +371,11 @@ add_zero_tests <- function(tests_df, nmax = 150) {
     )
   }
 
-  if (nrow(tests_df %>% filter(n == nmax & finding %in% c("True Positive", "False Negative"))) > 0) {
+  if (nrow(tests_df |> filter(n == nmax & finding %in% c("True Positive", "False Negative"))) > 0) {
     tests_df <- bind_rows(
       tests_df,
-      tests_df %>%
-        filter(n == nmax & finding %in% c("True Positive", "False Negative")) %>%
+      tests_df |>
+        filter(n == nmax & finding %in% c("True Positive", "False Negative")) |>
         mutate(
           finding = ifelse(finding == "True Positive", "False Negative", "True Positive"),
           n = 0
@@ -372,10 +387,10 @@ add_zero_tests <- function(tests_df, nmax = 150) {
 }
 
 df_test_vari <- bind_rows(
-  add_zero_tests(tests_lowb_hight, nmax = n_each) %>% mutate(vari = top_labs[1]),
-  add_zero_tests(tests_highb_lowt, nmax = n_each) %>% mutate(vari = top_labs[2])
-) %>%
-  mutate(vari = factor(vari, levels = top_labs)) %>%
+  add_zero_tests(tests_lowb_hight, nmax = n_each) |> mutate(vari = top_labs[1]),
+  add_zero_tests(tests_highb_lowt, nmax = n_each) |> mutate(vari = top_labs[2])
+) |>
+  mutate(vari = factor(vari, levels = top_labs)) |>
   mutate(
     model_simple = factor(
       ifelse(test == "T Test of Conditional Means", "Mixed Effects Model", test),
@@ -397,14 +412,14 @@ df_test_vari <- bind_rows(
   )
 
 itx_df <- bind_rows(
-  j_frame_lowb_hight %>% mutate(vari = top_labs[1]),
-  j_frame_highb_lowt %>% mutate(vari = top_labs[2])
-) %>%
-  mutate(vari = factor(vari, levels = top_labs)) %>%
-  dplyr::rename("Subsection" = "subtissue", "Condition" = "condition") %>%
-  group_by(vari) %>%
-  filter(feature_id == sort(unique(feature_id), decreasing = TRUE)[5]) %>%
-  ungroup() %>%
+  j_frame_lowb_hight |> mutate(vari = top_labs[1]),
+  j_frame_highb_lowt |> mutate(vari = top_labs[2])
+) |>
+  mutate(vari = factor(vari, levels = top_labs)) |>
+  dplyr::rename("Subsection" = "tissue", "Condition" = "condition") |>
+  group_by(vari) |>
+  filter(feature_id == sort(unique(feature_id), decreasing = TRUE)[5]) |>
+  ungroup() |>
   mutate(
     Condition = factor(case_match(Condition, "1" ~ "Osteoarthritis", "0" ~ "Control"),
       levels = c("Osteoarthritis", "Control")
@@ -420,8 +435,8 @@ ggarrange(
   annotate_figure(
     ggarrange(
       annotate_figure(
-        itx_df %>%
-          filter(vari == top_labs[1]) %>%
+        itx_df |>
+          filter(vari == top_labs[1]) |>
           ggplot(aes(x = Tissue, y = mean, group = subject, color = Condition, fill = Condition)) +
           geom_point() +
           geom_line() +
@@ -432,8 +447,8 @@ ggarrange(
         top = top_labs[1]
       ),
       annotate_figure(
-        itx_df %>%
-          filter(vari == top_labs[2]) %>%
+        itx_df |>
+          filter(vari == top_labs[2]) |>
           ggplot(aes(x = Tissue, y = mean, group = subject, color = Condition, fill = Condition)) +
           geom_point() +
           geom_line() +
@@ -454,9 +469,9 @@ ggarrange(
     ggarrange(
       annotate_figure(
         ggplot(
-          df_test_vari %>%
-            filter(vari == top_labs[1]) %>%
-            filter(finding %in% c("False Positive", "True Positive")) %>%
+          df_test_vari |>
+            filter(vari == top_labs[1]) |>
+            filter(finding %in% c("False Positive", "True Positive")) |>
             mutate(
               n = ifelse(finding == "False Positive", -1 * n, n),
               finding = factor(finding, levels = c("True Positive", "False Positive"))
@@ -477,9 +492,9 @@ ggarrange(
       ),
       annotate_figure(
         ggplot(
-          df_test_vari %>%
-            filter(vari == top_labs[2]) %>%
-            filter(finding %in% c("False Positive", "True Positive")) %>%
+          df_test_vari |>
+            filter(vari == top_labs[2]) |>
+            filter(finding %in% c("False Positive", "True Positive")) |>
             mutate(
               n = ifelse(finding == "False Positive", -1 * n, n),
               finding = factor(finding, levels = c("True Positive", "False Positive"))
@@ -511,15 +526,15 @@ ggarrange(
 ggsave(file.path("Recreated-Figures", "Figure-Variation-Simulation-2.png"), width = 11.5, height = 10, units = "in")
 ```
 
-This figure is the payoff of the first subsection. It shows that the same truth status can lead to different inferential behavior depending on how the variance is partitioned and which test is used.
 
-# Subsection B: Pixels as replicates
 
-The second strategy changes the unit of analysis. Instead of summarizing each feature within an image and treating the sample as the replicate, the script unfolds the image into pixel-level observations. This is statistically consequential because it changes the apparent amount of information available to each test.
+ # Pixels as replicates
 
-## Convert images to a pixel-level table
+ It is tempting to use pixels as replicates given the larger sample size than using sample means. Linear mixed-effects models, as well as most other linear models like ANOVA, linear regression, and t-tests, assume replicates are independent. As has been shown in previous work, pixels are not independent replicates; when substituted, they increase the sensitivity of models and hypothesis tests to the point that they become meaningless. We demonstrate this effect below. This section of the simulation code is computationally intense, and may not be suitable for all systems. Please proceed accordingly.
 
-The following block converts each simulated image into long format, one row per pixel-feature combination, then appends sample metadata.
+ ## Convert images to a pixel-level table
+
+ The following chunk converts each simulated image into long format, one row per pixel-feature combination, then appends sample metadata. Using `data.table` will help speed this process up and consume less memory. 
 
 ```{r pixel-level-frame, results='hide', message=FALSE, warning=FALSE}
 results_list <- list()
@@ -543,7 +558,7 @@ for (i in 1:16) {
 
   dt_long[, subject := samples[i, 1]]
   dt_long[, condition := samples[i, 3]]
-  dt_long[, subtissue := samples[i, 2]]
+  dt_long[, tissue := samples[i, 2]]
 
   results_list[[i]] <- dt_long
   rm(dt, dt_long, transposed_intensity_matrix)
@@ -552,43 +567,45 @@ for (i in 1:16) {
 
 pix_as_rep_sim <- rbindlist(results_list)
 rm(results_list)
-cols_to_factor <- c("feature_id", "subject", "condition", "subtissue")
+cols_to_factor <- c("feature_id", "subject", "condition", "tissue")
 pix_as_rep_sim[, (cols_to_factor) := lapply(.SD, as.factor), .SDcols = cols_to_factor]
 ```
 
-This is memory-intensive, and the original script uses `data.table` carefully for that reason. Conceptually, though, the step is simple: the image is no longer being treated as the observational unit.
 
 ## Fit pixel-level models on the same variance strata
 
-The script now reuses the same low-ICC and high-ICC feature sets, but it fits models to the long pixel-level table instead.
+To facilitate comparison, we will use the same two sets of features selected from above.
 
 ```{r pixel-level-models, results='hide', message=FALSE, warning=FALSE}
 pix_as_rep_sim_lowb_hight <- pix_as_rep_sim[feature_id %in% as.factor(feature_ids_for_lowb_hight), ]
 res_pixasrep_sim_lowb_hight <- run_models_MEMORY_EFF(
   pix_as_rep_sim_lowb_hight,
-  "intensity ~ condition * subtissue + (1|subject)"
+  "intensity ~ condition * tissue + (1|subject)"
 )
 
 pix_as_rep_sim_highb_lowt <- pix_as_rep_sim[feature_id %in% as.factor(feature_ids_for_highb_lowt), ]
 res_pixasrep_sim_highb_lowt <- run_models_MEMORY_EFF(
   pix_as_rep_sim_highb_lowt,
-  "intensity ~ condition * subtissue + (1|subject)"
+  "intensity ~ condition * tissue + (1|subject)"
 )
 ```
 
-The model formula looks familiar, but the data structure beneath it is different. That difference is exactly what the simulation is meant to expose.
-
 ## Build the pixel-level comparison summaries
 
-The original script defines a helper that compares mixed-effects results to simpler testing strategies after converting the pixel-level fits into a common plotting frame.
+Like its counterpart from the pixel means section above, this chunk uses a helper function, `get_comparison_plotting_frame_pix_as_rep()`, with the pixels-as-replicates simulated long-format dataset and the per-feature mixed-effects models we fit above to compute hypothesis tests and determine true and false positive rates.
+
+1. runs simple per-feature t‑tests (two sample t-tests, as there are no pairs of pixels between samples) for between subjects (control vs OA within medial) and within subjects (lateral vs medial within OA) hypotheses
+2. runs the same hypotheses tests using the estimates from the mixed-models (pairwise via emmeans), essentially testing the same hypotheses as the t-tests but with estimates that use all the data and more complex model specifications
+3. marks each feature as significant or not,
+4. then classifies each result as a true/false positive/negative and returns counts by model/test/term
 
 ```{r pixel-level-comparison-frame}
 get_comparison_plotting_frame_pix_as_rep <- function(mse_frame, model_res, nmax = 150) {
-  ttest_frame_condition <- mse_frame %>%
-    filter(subtissue == "1") %>%
-    group_by(feature_id) %>%
-    group_modify(~ broom::tidy(t.test(intensity ~ condition, data = .x, var.equal = TRUE))) %>%
-    ungroup() %>%
+  ttest_frame_condition <- mse_frame |>
+    filter(tissue == "1") |>
+    group_by(feature_id) |>
+    group_modify(~ broom::tidy(t.test(intensity ~ condition, data = .x, var.equal = TRUE))) |>
+    ungroup() |>
     mutate(
       SE = estimate / statistic,
       adj_p.value = p.adjust(p.value, method = "fdr"),
@@ -596,12 +613,12 @@ get_comparison_plotting_frame_pix_as_rep <- function(mse_frame, model_res, nmax 
       feature_id = row_number()
     )
 
-  ttest_frame_subtissue <- mse_frame %>%
-    filter(condition == "1") %>%
-    group_by(feature_id) %>%
-    arrange(subtissue, subject) %>%
-    group_modify(~ broom::tidy(t.test(intensity ~ subtissue, data = .x, var.equal = TRUE))) %>%
-    ungroup() %>%
+  ttest_frame_tissue <- mse_frame |>
+    filter(condition == "1") |>
+    group_by(feature_id) |>
+    arrange(tissue, subject) |>
+    group_modify(~ broom::tidy(t.test(intensity ~ tissue, data = .x, var.equal = TRUE))) |>
+    ungroup() |>
     mutate(
       SE = estimate / statistic,
       adj_p.value = p.adjust(p.value, method = "fdr"),
@@ -611,66 +628,66 @@ get_comparison_plotting_frame_pix_as_rep <- function(mse_frame, model_res, nmax 
 
   contrasts_means <- bind_rows(lapply(model_res[[1]], FUN = function(m) {
     bind_rows(
-      tidy(contrast(emmeans(m, ~ condition | subtissue, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename(subgroup = subtissue),
-      tidy(contrast(emmeans(m, ~ subtissue | condition, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename(subgroup = condition)
+      tidy(contrast(emmeans(m, ~ condition | tissue, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) |> dplyr::rename(subgroup = tissue),
+      tidy(contrast(emmeans(m, ~ tissue | condition, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) |> dplyr::rename(subgroup = condition)
     )
-  })) %>%
-    group_by(term, subgroup) %>%
+  })) |>
+    group_by(term, subgroup) |>
     mutate(
       feature_id = row_number(),
       adj_p.value = p.adjust(p.value, method = "fdr")
-    ) %>%
+    ) |>
     ungroup()
 
   bind_rows(
-    contrasts_means %>%
-      filter(subgroup == "1") %>%
+    contrasts_means |>
+      filter(subgroup == "1") |>
       mutate(
         significant = p.value < 0.05,
         truth = as.numeric(feature_id) > 150,
         finding = ifelse(significant, ifelse(truth, "True Positive", "False Positive"), ifelse(truth, "False Negative", "True Negative"))
-      ) %>%
-      group_by(finding, term, .drop = FALSE) %>%
-      summarise(n = n(), .groups = "keep") %>%
-      ungroup() %>%
+      ) |>
+      group_by(finding, term, .drop = FALSE) |>
+      summarise(n = n(), .groups = "keep") |>
+      ungroup() |>
       mutate(
         model = "Mixed Effects Model with All Variables",
         test = "T Test of Conditional Means",
-        null = case_match(term, "condition" ~ "In Medial:\nControl vs Osteoarthritis", "subtissue" ~ "In Osteoarthritis:\nLateral vs Medial"),
-        term = case_match(term, "condition" ~ "Condition", "condition:subtissue" ~ "Interaction", "subtissue" ~ "Subsection")
-      ) %>%
+        null = case_match(term, "condition" ~ "In Medial:\nControl vs Osteoarthritis", "tissue" ~ "In Osteoarthritis:\nLateral vs Medial"),
+        term = case_match(term, "condition" ~ "Condition", "condition:tissue" ~ "Interaction", "tissue" ~ "Subsection")
+      ) |>
       dplyr::select(finding, n, model, test, null, term),
-    ttest_frame_condition %>%
+    ttest_frame_condition |>
       mutate(
         significant = p.value < 0.05,
         truth = as.numeric(feature_id) > nmax,
         finding = ifelse(significant, ifelse(truth, "True Positive", "False Positive"), ifelse(truth, "False Negative", "True Negative"))
-      ) %>%
-      group_by(finding, .drop = FALSE) %>%
-      summarise(n = n(), .groups = "keep") %>%
-      ungroup() %>%
+      ) |>
+      group_by(finding, .drop = FALSE) |>
+      summarise(n = n(), .groups = "keep") |>
+      ungroup() |>
       mutate(
         model = "Linear Model with Condition",
         null = "In Medial:\nControl vs Osteoarthritis",
         test = "Two Sample T Test",
         term = "Condition"
-      ) %>%
+      ) |>
       dplyr::select(finding, n, model, test, null, term),
-    ttest_frame_subtissue %>%
+    ttest_frame_tissue |>
       mutate(
         significant = p.value < 0.05,
         truth = as.numeric(feature_id) > nmax,
         finding = ifelse(significant, ifelse(truth, "True Positive", "False Positive"), ifelse(truth, "False Negative", "True Negative"))
-      ) %>%
-      group_by(finding, .drop = FALSE) %>%
-      summarise(n = n(), .groups = "keep") %>%
-      ungroup() %>%
+      ) |>
+      group_by(finding, .drop = FALSE) |>
+      summarise(n = n(), .groups = "keep") |>
+      ungroup() |>
       mutate(
-        model = "Linear Model of Paired Differences\nBetween Subtissues",
+        model = "Linear Model of Paired Differences\nBetween tissues",
         null = "In Osteoarthritis:\nLateral vs Medial",
         test = "Paired T Test",
         term = "Subsection"
-      ) %>%
+      ) |>
       dplyr::select(finding, n, model, test, null, term)
   )
 }
@@ -686,16 +703,16 @@ tests_pix_as_reps_highb_lowt <- get_comparison_plotting_frame_pix_as_rep(
 )
 ```
 
-This section mirrors the means-based analysis as closely as possible. That is what makes the eventual contrast informative: the tests are similar, but the observational unit has changed.
-
 ## Build the pixels-as-replicates comparison figure
+
+We will now recreate the figures from above showing the true and false positive rates for each model and hypothesis.
 
 ```{r pixel-level-figure, fig.width=11.5, fig.height=6, message=FALSE, warning=FALSE}
 df_test_vari_pix_as_reps <- bind_rows(
-  add_zero_tests(tests_pix_as_reps_lowb_hight) %>% mutate(vari = top_labs[1]),
-  add_zero_tests(tests_pix_as_reps_highb_lowt) %>% mutate(vari = top_labs[2])
-) %>%
-  mutate(vari = factor(vari, levels = top_labs)) %>%
+  add_zero_tests(tests_pix_as_reps_lowb_hight) |> mutate(vari = top_labs[1]),
+  add_zero_tests(tests_pix_as_reps_highb_lowt) |> mutate(vari = top_labs[2])
+) |>
+  mutate(vari = factor(vari, levels = top_labs)) |>
   mutate(
     model_simple = factor(
       ifelse(test == "T Test of Conditional Means", "Mixed Effects Model", test),
@@ -720,9 +737,9 @@ annotate_figure(
   ggarrange(
     annotate_figure(
       ggplot(
-        df_test_vari_pix_as_reps %>%
-          filter(vari == top_labs[1]) %>%
-          filter(finding %in% c("False Positive", "True Positive")) %>%
+        df_test_vari_pix_as_reps |>
+          filter(vari == top_labs[1]) |>
+          filter(finding %in% c("False Positive", "True Positive")) |>
           mutate(
             n = ifelse(finding == "False Positive", -1 * n, n),
             finding = factor(finding, levels = c("True Positive", "False Positive"))
@@ -743,9 +760,9 @@ annotate_figure(
     ),
     annotate_figure(
       ggplot(
-        df_test_vari_pix_as_reps %>%
-          filter(vari == top_labs[2]) %>%
-          filter(finding %in% c("False Positive", "True Positive")) %>%
+        df_test_vari_pix_as_reps |>
+          filter(vari == top_labs[2]) |>
+          filter(finding %in% c("False Positive", "True Positive")) |>
           mutate(
             n = ifelse(finding == "False Positive", -1 * n, n),
             finding = factor(finding, levels = c("True Positive", "False Positive"))
@@ -773,66 +790,3 @@ annotate_figure(
 
 ggsave(file.path("Recreated-Figures", "Figure-Variation-Simulation-2-Pixels-as-Replicates.png"), width = 11.5, height = 6, units = "in")
 ```
-
-The practical interpretation is straightforward. Once pixels are treated as replicates, the apparent amount of information increases substantially, but that does not mean the analysis has gained independent biological replication. This is the statistical tension the simulation is meant to illustrate.
-
-# Effect-size overestimation diagnostic
-
-The script ends with a useful diagnostic on the non-null features. It compares the distribution of estimated effects among significant and non-significant findings, with the true effect marked for reference.
-
-```{r effect-size-overestimation, fig.width=8, fig.height=5, message=FALSE, warning=FALSE}
-with_effects <- run_models_sim_list[[1]][1501:3000]
-
-contrasts_means_with_effects <- bind_rows(lapply(with_effects, FUN = function(m) {
-  bind_rows(
-    tidy(contrast(emmeans(m, ~ condition | subtissue, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename(subgroup = subtissue),
-    tidy(contrast(emmeans(m, ~ subtissue | condition, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename(subgroup = condition)
-  )
-})) %>%
-  group_by(term, subgroup) %>%
-  mutate(
-    feature_id = row_number(),
-    adj_p.value = p.adjust(p.value, method = "fdr")
-  ) %>%
-  ungroup()
-
-means <- contrasts_means_with_effects %>%
-  filter(subgroup == 1) %>%
-  mutate(group = p.value > 0.05) %>%
-  group_by(group) %>%
-  summarize(mean_estimate = -1 * mean(abs(estimate), na.rm = TRUE), .groups = "drop")
-
-contrasts_means_with_effects %>%
-  filter(subgroup == 1) %>%
-  mutate(group = p.value > 0.05) %>%
-  ggplot(aes(x = -1 * estimate, group = group, fill = group)) +
-  theme_classic() +
-  geom_histogram(bins = 100, position = "identity", alpha = 0.4) +
-  geom_segment(x = 15, xend = 15, y = 0, yend = 64, size = 0.8) +
-  geom_segment(
-    data = means,
-    aes(x = mean_estimate, xend = mean_estimate, y = 0, yend = 71, color = group),
-    linetype = "31",
-    size = 1
-  ) +
-  labs(
-    x = "Estimates of Effect",
-    y = "Number of comparisons of from similations",
-    group = "P < 0.05"
-  ) +
-  annotate("text", x = 15, y = 68, label = "True\nEffect") +
-  annotate("text", x = means$mean_estimate, y = 74,
-           label = c("Mean Effect\n when P>0.05", "Mean Effect\nwhen P<0.05"))
-```
-
-This final plot is helpful because it emphasizes that significance filtering can distort effect-size summaries. Even in a controlled simulation with known truth, the set of significant estimates may not be centered on the true effect.
-
-# Interpretation
-
-This simulation separates two ideas that are easy to blur in practice.
-
-First, it shows that variance structure matters. Features with the same underlying truth can behave differently depending on whether their variability is dominated more by subject-level or technical sources.
-
-Second, it shows that the unit of analysis matters. Summarizing at the image level respects the biological replication structure. Treating pixels as replicates changes the apparent sample size and can change the inferential behavior of the same nominal model.
-
-That is the main lesson of `Simulation-2.R`. The simulation is not merely comparing tests in the abstract. It is showing that the same scientific question can look different depending on how the data are represented before testing. For MSI studies, that is a reminder that feature extraction and replication assumptions are statistical decisions, not only preprocessing decisions.
