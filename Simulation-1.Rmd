@@ -87,10 +87,32 @@ knitr::kable(samples)
 
 This layout is intentionally simple. The goal is not to reproduce every detail of the experimental design from the real data, but to create a structured setting where signal can be attached to condition, tissue, or both, and then tested after segmentation.
 
-# Load the starting image objects
+# Create the simlation startinging images
 
 ```{r load-simulation-base}
-load("Simulation-Data/sim_list_original.RData")
+
+set.seed(123, kind = "L'Ecuyer-CMRG")
+ sim_list_original <- list()
+ for (i in 1:nrow(samples)) {
+   sim_list_original[[i]] <- simulateImage(pdx,
+                                           fdx, 
+                                           sdpixel = pixel_sd, 
+                                           sdrun = 0, 
+                                           sdmz = 0, 
+                                           sdmult = 0, 
+                                           sdpeaks = 0, 
+                                           sdnoise = 0.0, 
+                                           SAR = FALSE, 
+                                           baseline = 0,
+                                           spcorr = 0.5,
+                                           centroided = TRUE, 
+                                           verbose = TRUE,
+                                           BPPARAM=SnowfastParam())
+}
+
+save(sim_list_original, file = "sim_list_original.RData")
+
+#load(file.path("Simulation-Data","sim_list_original.RData"))
 length(sim_list_original)
 ```
 
