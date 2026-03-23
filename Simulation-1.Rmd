@@ -110,7 +110,7 @@ set.seed(123, kind = "L'Ecuyer-CMRG")
                                            BPPARAM=SnowfastParam())
 }
 
-save(sim_list_original, file = "sim_list_original.RData")
+save(sim_list_original, file = file.path("Simulation-Data", "sim_list_original.RData"))
 
 #load(file.path("Simulation-Data","sim_list_original.RData"))
 length(sim_list_original)
