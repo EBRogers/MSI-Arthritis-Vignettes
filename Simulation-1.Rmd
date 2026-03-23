@@ -18,7 +18,7 @@ local({
 })
 ```
 
-This simulation is meant to create a setting where the ground truth is known, so that we can evaluate whether ROI discovery and downstream modeling recover the intended signal. The script in `Simulation-1.R` is not just generating synthetic images arbitrarily. It encodes a fairly specific question: if differential abundance is confined to a spatially localized ROI, how well do oracle and data-driven ROI definitions recover that effect, and what kinds of false positive behavior do they induce?
+Simulation 1 was designed to evaluate the performance of multivariate clustering methods, speciclaky spatiual shrunken centroids and spatiual K means, for ROI segmentation. We will create images with spatially autocorrelated background noise and clearly defined ROIs. All samples will share a set of features that clearly and consistantly define regions of interest. Then there will be a set of nuisence features, which do not contain the ROI. Finally, there will be 500 features that have a differnetially abundennt effects in the ROIs only. We will then segment the ROIs with two methods and review the results.    
 
 # Load dependencies
 
@@ -39,13 +39,13 @@ setCardinalVerbose(verbose = FALSE)
 
 # Simulation overview
 
-The simulation begins from an existing list of images rather than from a completely synthetic pixel grid. This is an important design choice. By starting from `sim_list_original`, the simulation keeps realistic image geometry, feature dimensionality, and some of the structure expected by the downstream Cardinal workflows. The code then overwrites the intensity scale so that we can impose known feature-level effects while still working with objects that behave like the real data.
+The simulation begins from an existing list of image objects saved as `sim_list_original`. These are the same base images that will be used for Simulation 2, and were simulated using Cardinal's `simulateImage` function.
 
 The major ingredients are:
 
 - a shared baseline intensity level
 - feature-specific pixel standard deviations
-- a sample table defining subject, subtissue, and condition
+- a sample table defining subject, tissue, and condition
 - feature-level effect vectors defining where true signal exists
 - residual variation
 - an oracle ROI used as the reference target
@@ -71,24 +71,24 @@ fdx <- MassDataFrame(1:3000)
 fdx$all <- baseline
 ```
 
-This is one of the first places where the simulation makes an explicit decision about realism. The baseline is simple and fixed, but the feature standard deviations are heterogeneous. That gives the resulting images a more realistic spread in feature variability and avoids a simulation where every mass channel behaves too uniformly.
+This simulation does enforce the assumption that not every pixel will have the same standard deviation, and that standard deviations of pixels are normally distributed. . At small values that is not possible, as sd cannot be negative - thus we will arbitrarily increase values to avoid this. We will also flag very small values for pixel sd.
 
 # Define the sample structure
 
-The simulation uses 16 samples, corresponding to 8 subjects crossed with a binary subtissue indicator and a binary condition indicator.
+The simulation uses 16 samples, corresponding to 8 subjects crossed with a binary tissue indicator and a binary condition indicator.  We will make this design more complex than necessary to assist with our simulations later.
 
 ```{r sample-metadata}
 samples <- data.frame(
   subject = c(1:8, 1:8),
-  subtissue = c(rep(0, 8), rep(1, 8)),
+  tissue = c(rep(0, 8), rep(1, 8)),
   condition = c(rep(0, 4), rep(1, 4), rep(0, 4), rep(1, 4))
 ) |>
-  mutate(id = paste0(subject, "_", subtissue, "_", condition))
+  mutate(id = paste0(subject, "_", tissue, "_", condition))
 
 knitr::kable(samples)
 ```
 
-This layout is intentionally simple. The goal is not to reproduce every detail of the experimental design from the real data, but to create a structured setting where signal can be attached to condition, subtissue, or both, and then tested after segmentation.
+This layout is intentionally simple. The goal is not to reproduce every detail of the experimental design from the real data, but to create a structured setting where signal can be attached to condition, tissue, or both, and then tested after segmentation.
 
 # Load the starting image objects
 
@@ -97,14 +97,12 @@ load("Simulation-Data/sim_list_original.RData")
 length(sim_list_original)
 ```
 
-The loaded object serves as the geometric scaffold for the rest of the simulation. Everything downstream depends on this list already being compatible with the functions in `SimulationUtilities.R`.
-
 # Define feature-level effects and variance components
 
 The next block is where the important simulation assumptions are encoded. We specify:
 
-- `delta_in_roi`, the magnitude of the condition or subtissue effect
-- `ROI_def_delta`, a separate effect used to define the oracle ROI
+- `delta_in_roi`, the magnitude of the condition or tissue effect in the ROI
+- `ROI_def_delta`, the magnitude of the intensity difference between the background and ROI in ROI defining features
 - `resid`, the residual variation scale
 
 ```{r effect-parameters}
@@ -114,41 +112,31 @@ resid <- sqrt(70)
 ROI_def_delta <- 40
 ```
 
-The simulation then builds feature-wise effect vectors. In the "normal subtissue" configuration, the subtissue effect is localized to selected blocks of features, the condition effect is restricted to the final 500 features, and the ROI-defining features are concentrated in the first 100 features.
+The simulation then builds feature-wise effect vectors. The condition effect is restricted to the final 500 features, and the ROI-defining features are concentrated in the first 100 features.
 
 ```{r effect-vectors}
 set.seed(2024)
-effects_normal_subtissue <- tibble(
+effects_normal <- tibble(
   mz = mz(sim_list_original[[1]]),
-  subtissue = c(rep(0, 2250), rep(delta_in_roi, 250), rep(0, 250), rep(delta_in_roi, 250)),
   condition = c(rep(0, 2500), rep(-1 * delta_in_roi, 250), rep(delta_in_roi, 250)),
-  ROI_defining_features = c(rep(ROI_def_delta, 50), rep(-ROI_def_delta, 50), rep(0, 2900))
-)
-
-set.seed(2024)
-effects_shuffled_subtissue <- tibble(
-  mz = mz(sim_list_original[[1]]),
-  subtissue = c(rep(0, 100), sample(rep(c(0, delta_in_roi), 2900 / 2))),
-  condition = c(rep(0, 2500), rep(delta_in_roi, 500)),
   ROI_defining_features = c(rep(ROI_def_delta, 50), rep(-ROI_def_delta, 50), rep(0, 2900))
 )
 ```
 
 This is doing several things at once.
 
-First, it makes only a subset of features truly differential. That is necessary if we want to talk meaningfully about true positives and false positives later.
+First, it makes only a subset of features truly differential. That is necessary if we want to talk meaningfully about both true *and* false positives later.
 
-Second, it separates the features that define the ROI from the features that carry the condition effect. That separation matters. If ROI construction and testing were driven by the exact same features, the simulation would be too favorable to the segmentation method.
+Second, it separates the features that define the ROI from the features that carry the condition effect. This is to mirror the real world situation that the biological structures (that one might want to segment ROIs of) have features that define them as well as change within them. The methods can use any features of the feature set to draw the ROIs.
 
-Third, it includes both a structured subtissue pattern and a shuffled alternative. Even though the main workflow below emphasizes the condition-within-ROI setting, these alternative effect layouts make it possible to study how segmentation behaves when structure is either spatially coherent or more diffuse.
 
 # Generate residual variation
 
-The script next generates a sample-by-feature residual variation matrix. This provides between-sample fluctuation around the fixed effect structure without adding another active variance component to the simulation.
+The script next generates a sample-by-feature residual variation matrix.
 
 ```{r variance-matrices}
 set.seed(2026)
-residual_mat <- matrix(rnorm(16 * nrow(effects_normal_subtissue), sd = resid), nrow = 16)
+residual_mat <- matrix(rnorm(16 * nrow(effects_normal), sd = resid), nrow = 16)
 residual_mat <- scale(residual_mat, center = TRUE, scale = FALSE)
 ```
 
@@ -156,61 +144,43 @@ This keeps the active simulation relatively easy to interpret: the feature-level
 
 # Construct the target mean structures
 
-The next step combines the fixed effects, ROI-defining features, residual variation, and baseline into mean intensity targets for each sample.
+The next step combines the fixed effects, ROI-defining features, residual variation, and baseline into mean intensity targets for the ROI and the background.
 
 ```{r target-mean-matrices}
 effects_matrix_c2 <- sapply(1:16, function(i) {
-  samples[[i, "condition"]] * effects_normal_subtissue$condition +
-    effects_normal_subtissue$ROI_defining_features +
-    residual_mat[i, ] +
-    baseline
-})
-
-effects_matrix_c2_subtissue_normal <- sapply(1:16, function(i) {
-  samples[[i, "subtissue"]] * effects_normal_subtissue$subtissue +
-    samples[[i, "condition"]] * effects_normal_subtissue$condition +
-    effects_normal_subtissue$ROI_defining_features +
-    residual_mat[i, ] +
-    baseline
-})
-
-effects_matrix_c2_subtissue_shuffled <- sapply(1:16, function(i) {
-  samples[[i, "subtissue"]] * effects_shuffled_subtissue$subtissue +
-    samples[[i, "condition"]] * effects_shuffled_subtissue$condition +
-    effects_shuffled_subtissue$ROI_defining_features +
+  samples[[i, "condition"]] * effects_normal$condition +
+    effects_normal$ROI_defining_features +
     residual_mat[i, ] +
     baseline
 })
 
 effects_matrix_bg <- sapply(1:16, function(i) {
-  -1 * effects_normal_subtissue$ROI_defining_features +
+  -1 * effects_normal$ROI_defining_features +
     residual_mat[i, ] +
     baseline
 })
 ```
 
-The key comparison in this script is between the donut-shaped ROI and the background. Features that define the ROI are pushed in opposite directions inside and outside the ROI. Separately, the condition effect is restricted to the final 500 features in the ROI. This means the simulation has both a segmentation problem and an inference problem.
+Features that define the ROI are pushed in opposite directions inside and outside the ROI. Separately, the condition effect is restricted to the final 500 features in the ROI.
 
 A simple safety check follows.
 
 ```{r effect-sanity-check}
 i <- 1
 for (eff in c(effects_matrix_bg,
-              effects_matrix_c2_subtissue_shuffled,
-              effects_matrix_c2_subtissue_normal,
               effects_matrix_c2)) {
   if (any(eff < 0)) {
-    stop(paste0("Some NON GAMMA effects in ", i, " have negative means."))
+    stop(paste0("Some effects in ", i, " have negative means."))
   }
   i <- i + 1
 }
 ```
 
-This matters because later steps rescale observed intensities to match these targets. Negative means would be inconsistent with the intended intensity scale.
+Negative means would be inconsistent with real world MSI images.
 
 # Build the oracle ROI into each image
 
-We now overwrite the original images so that they contain a known donut-shaped ROI. The outer circle is the ROI of interest and the inner circle is removed from that ROI, leaving a ring. Pixels outside the ring are assigned to the background.
+We now define the actual pixels that make up the ROI and the background then apply the effects generated above.
 
 ```{r build-oracle-roi, message=FALSE, warning=FALSE}
 sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i) {
@@ -254,26 +224,22 @@ sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i) {
 }, BPPARAM = SnowfastParam(8))
 ```
 
-This is the core of the simulation. The code first sets the whole image to the background mean structure and then selectively rescales only the oracle ROI pixels to the ROI mean structure. Because this is done feature by feature, the resulting data preserve both spatial localization and feature-specific variability.
-
-Using an oracle donut is a useful compromise. It is simple enough to recover visually, but still complicated enough to test whether clustering methods can identify a nontrivial ROI boundary.
-
 # Segment the simulated images with two methods
 
 The script then applies two unsupervised segmentation methods.
 
-The first is spatial shrunken centroids (SSC), using multiple penalty values. The second is spatial k-means (SKM), using seven clusters. Both are run separately on each simulated image.
+The first is spatial shrunken centroids (SSC), using multiple regularization values. The second is spatial k-means (SKM), using seven clusters. Both are run separately on each simulated image.
 
 ```{r run-segmentation, message=FALSE, warning=FALSE}
 sscl <- bplapply(sim_list_adj, FUN = function(m) {
   set.seed(123456789, kind = "L'Ecuyer-CMRG")
   spatialShrunkenCentroids(m, k = 4, s = c(6, 9, 12, 15), weights = "adaptive")
-}, BPPARAM = SnowfastParam(16))
+}, BPPARAM = SnowfastParam(8))
 
 skml_7c <- bplapply(sim_list_adj, FUN = function(m) {
   set.seed(123456789, kind = "L'Ecuyer-CMRG")
   spatialKMeans(m, k = 7, weights = "adaptive")
-}, BPPARAM = SnowfastParam(16))
+}, BPPARAM = SnowfastParam(8))
 ```
 
 These parameter choices are part of what the simulation is actually testing. The oracle ROI is known, so segmentation quality can be evaluated after the fact. SSC and SKM are not being used here as discovery tools in the usual sense; they are being benchmarked against a known target.

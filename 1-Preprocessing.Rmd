@@ -87,7 +87,7 @@ for (f in MSE_FILENAMES) {
 ```
 
 This code will recreate figures from the manuscript.
-```{r fig-peakpicking-a, results='hide', warning=FALSE, message=FALSE, echo=FALSE}
+```{r fig-peakpicking-a, results='hide', warning=FALSE, message=FALSE, echo=TRUE}
 png(filename = file.path("Recreated-Figures", 
                          "Figure-Peakpicking-Raw.png"), 
     height = 500, width = 1000, pointsize = 20)
@@ -132,9 +132,9 @@ Before recalibration, `mse` holds metadata in memory and its intensity matrix ou
 Peak picking is the process of selecting informative peaks for later analysis. For multi-sample experiments, peak picking must yield feature sets with a shared mass spectrum. We will begin with smoothing and baseline reduction. Not all datasets require these steps. Smoothing can help denoise outlier pixels. Baseline reduction corrects baseline increases that often happen at small mass ranges.
 
 We will perform smoothing and baseline recalibration individually on each sample, using parallel processing to speed up processing on each sample.
-```{r peak-picking-params}
+```{r peak-picking-params, warning=FALSE, message=FALSE, }
 calibrant_mz <- sort(c(1570.6896, 843.39, 1019.50, 1211.58, 1552, 2097))
-gc()
+invisible(gc())
 for (n in names(mse_list_raw)) {
   cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," BLR + SMOOTH\n")
   m <- mse_list_raw[[n]]|> 
@@ -149,7 +149,7 @@ for (n in names(mse_list_raw)) {
                         paste0(runNames(m), ".imzML")),
               BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
   rm(m)
-  gc()
+  invisible(gc())
 }
 ```
 
@@ -183,7 +183,7 @@ for (n in names(mse_list_smooth)){
               recalibrate(ref = esti_ref_peaks, tolerance = 80, units = "ppm") |> 
               recalibrate(ref = calibrant_mz, tolerance = 80, units = "ppm") |>
               process(BPPARAM=SnowfastParam(workers = 15L, force.GC = T))
-  gc()
+  invisible(gc())
 
   cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," WRITE\n")
   writeMSIDataSafe(m_recalib_picked,
@@ -193,11 +193,11 @@ for (n in names(mse_list_smooth)){
                         paste0(runNames(m_recalib_picked), ".imzML")),
               BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
   rm(m_recalib_picked)
-  gc()
+  invisible(gc())
 }
 
 rm(mse_list_smooth)
-gc()
+invisible(gc())
 ```
 
 As before, reload intermediates to be out of memory. 
@@ -247,7 +247,7 @@ mse_all <- combine(mse_list_rp) |>
               na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
 
 rm(mse_list_rp)
-gc()
+invisible(gc())
 
 # This is likely unnecessary, but may prevent 
 # issues with older versions of Cardinal
@@ -293,7 +293,7 @@ mse_all_filt <- mse_all |>
   filterFeaturesByRunFreq(0.05) |> 
   summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
     na.rm = T,  BPPARAM=SnowfastParam(workers = 5L))
-gc()
+invisible(gc())
 ```
 
 Write the uniform, peak-picked image to disk.
@@ -323,7 +323,7 @@ Remove unnecessary objects from memory.
 ```{r plot-mean-and-cleanup}
 #CLEAN UP
 rm(m, mse_all_filt, mse_all)
-gc()
+invisible(gc())
 ```
 
 
@@ -343,6 +343,9 @@ library(Cardinal)
 source(file.path("Utilities.R"))
 
 RNGkind("L'Ecuyer-CMRG")
+
+
+setCardinalVerbose(verbose = FALSE)
 
 # Patch for domain-filtered sparse_mat coercion bug
 setMethod("as.vector", "sparse_arr",
@@ -817,7 +820,7 @@ rm(m, sdgmm,
   background_and_bone_features, 
   cartilage_features, mse_list_pp, 
   background_and_bone_features_condensed)
-gc()
+invisible(gc())
 ```
 
 # Normalization
@@ -833,7 +836,8 @@ library(Cardinal)
 source(file.path("Utilities.R"))
 
 RNGkind("L'Ecuyer-CMRG")
-setCardinalVerbose(TRUE)
+
+setCardinalVerbose(verbose = FALSE)
 
 options(stringsAsFactors = FALSE)
 ```

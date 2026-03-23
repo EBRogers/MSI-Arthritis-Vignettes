@@ -278,38 +278,32 @@ signift_cartilage |>
 As the distribution of p-values is neither uniform nor right-skewed, there may be some interdependence between tests, but this is hard to verify with so few tests overall. It would not be surprising were there interdependence however, as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `locfdr` package.
 
 This code below will recreate the tables and figures from the manuscript.
-```{r}
-knitr::kable(model_fit_eval |> select(-c(feature_id)))
-
-
-knitr::kable(model_fit_eval |> select(-c(feature_id)))
-
-
+```{r, results='hide', warning=FALSE, message=FALSE, output = "hide"}
 knitr::kable(model_fit_eval |> select(-c(feature_id)))
 
 signift_cartilage |> 
   filter(contrast == "control_vs_osteoarthritis_in_medial") |>
   mutate(feature_id = as.integer(feature_id)) |>
   left_join(passed) |>
-  mutate(mz = round(mz, 3),
-          estimate = round(estimate, 3),
-          SE = round(SE, 3),
-          p.value = round(p.value, 3),
-          p_value_fdr = round(p_value_fdr, 3)) |>
-  select(mz, estimate, SE, p.value, p_value_fdr) |> 
-  arrange(p.value) |>
+  mutate(`M/Z` = round(mz, 3),
+          Estimate = round(estimate, 3),
+          Std.Error = round(SE, 3),
+          `P Value` = round(p.value, 3),
+          `FDR Adj. P value` = round(p_value_fdr, 3)) |>
+  select(`M/Z`, Estimate, Std, `P Value`, `FDR Adj. P value`) |> 
+  arrange(`P Value`) |>
   knitr::kable()
 
 signift_cartilage |> 
   filter(contrast == "lateral_vs_medial_in_osteoarthritis") |>
   mutate(feature_id = as.integer(feature_id)) |>
   left_join(passed) |>
-  mutate(mz = round(mz, 3),
-          estimate = round(estimate, 3),
-          SE = round(SE, 3),
-          p.value = round(p.value, 3),
-          p_value_fdr = round(p_value_fdr, 3)) |>
-  select(mz, estimate, SE, p.value, p_value_fdr) |> 
-  arrange(p.value) |>
+  mutate(`M/Z` = round(mz, 3),
+          Estimate = round(estimate, 3),
+          Std.Error = round(SE, 3),
+          `P Value` = round(p.value, 3),
+          `FDR Adj. P value` = round(p_value_fdr, 3)) |>
+  select(`M/Z`, Estimate, Std, `P Value`, `FDR Adj. P value`) |> 
+  arrange(`P Value`) |>
   knitr::kable()
 ```

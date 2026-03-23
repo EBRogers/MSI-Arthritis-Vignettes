@@ -357,10 +357,9 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 ```
 
 
-### Code to recreate figures
+### Code to recreate figures and tables
 
-```{r}
-
+```{r, results='hide', warning=FALSE, message=FALSE}
 mse_pp <- readMSIData(file.path("Data", "Preprocessing", "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"),
   verbose = F)
 cat("After Peak Picking ",length(mz(mse_pp)), "\n")
@@ -390,8 +389,7 @@ cat("After cartilage sparsity filtering ", length(mz(mse_cart_filtered)), "\n")
 ```
 
 
-```{r}
-
+```{r, results='hide', warning=FALSE, message=FALSE}
 cat("Approximate m/z of preselected features used to segment cartilage (and isotopes/spatial analogs): ", 
   paste(round(c(1141.5556, 1142.524),3), collapse = ", "), "\n")
 cat("Approximate m/z of preselected features used to segment background (and isotopes/spatial analogs): ", 
@@ -407,15 +405,13 @@ cat("Double ion isotopes: ",
 cat("Triple ion isotopes: ", 
   paste(round(iso_merged |> group_by(group_id) |> filter(n() == 3) |> pull(mz),3), collapse = ", "), "\n")
 
-
 cat("Approxiamte m/z features dropped during Cartilage ROI sparsity filtering: ", 
   paste(round(setdiff(mz(mse_deiso), mz(mse_cart_filtered)),3), collapse = ", "), "\n")
 
 ```
 
 
-```{r}
-
+```{r, results='hide', warning=FALSE, message=FALSE}
 knitr::kable(
   iso_merged |>
     group_by(group_id) |>
@@ -473,9 +469,7 @@ dev.off()
 
 ```
 
-### Code to recreate tables
-
-```{r}
+```{r, results='hide', warning=FALSE, message=FALSE}
 
 paste0(iso_merged |>
          group_by(group_id) |>
