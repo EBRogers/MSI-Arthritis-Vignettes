@@ -639,6 +639,9 @@ do.call(
     )
   )
 )
+```
+
+```{r , fig.width=8, fig.height=8, echo = FALSE}
 knitr::include_graphics(ssc_venn_roidiff_file)
 ```
 
@@ -686,6 +689,9 @@ do.call(
     )
   )
 )
+```
+
+```{r , fig.width=8, fig.height=8, echo = FALSE}
 knitr::include_graphics(skm_venn_roidef_file)
 ```
 
