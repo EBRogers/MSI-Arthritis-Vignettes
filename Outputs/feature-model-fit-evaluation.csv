@@ -77,7 +77,7 @@ feature_id,mz,qq_normality,residual_variance,outliers
 76,1790.787745,OK,OK,OK
 77,1799.788469,OK,OK,OK
 78,1832.825949,OK,OK,OK
-79,1833.813934,,,
+79,1833.813934,OK,OK,Borderline
 80,1838.824643,Borderline,OK,Borderline
 81,1839.824358,OK,OK,OK
 82,1856.860654,Serious,OK,OK
