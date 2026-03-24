@@ -390,6 +390,7 @@ cat("After cartilage sparsity filtering ", length(mz(mse_cart_filtered)), "\n")
 
 
 ```{r, results='hide', warning=FALSE, message=FALSE}
+cat("Table S3\n")
 cat("Approximate m/z of preselected features used to segment cartilage (and isotopes/spatial analogs): ", 
   paste(round(c(1141.5556, 1142.524),3), collapse = ", "), "\n")
 cat("Approximate m/z of preselected features used to segment background (and isotopes/spatial analogs): ", 
@@ -397,12 +398,12 @@ cat("Approximate m/z of preselected features used to segment background (and iso
 cat("Approximate m/z of features removed by non-specific filtering: ", 
   paste(setdiff(round(setdiff(mz(mse_pre_filt), mz(mse_ns_filt)),3), round(other_ions_in_roi_selection, 3)), collapse = ", "), "\n")
 
-
-cat("Single ion isotopes: ", 
+cat("Table S4\n")
+cat("Approximate single ion m/z features: ", 
   paste(round(iso_merged |> group_by(group_id) |> filter(n() == 1) |> pull(mz),3), collapse = ", "), "\n")
-cat("Double ion isotopes: ", 
+cat("Approximate m/z features part of 2-member isotope groups: ", 
   paste(round(iso_merged |> group_by(group_id) |> filter(n() == 2) |> pull(mz),3), collapse = ", "), "\n")
-cat("Triple ion isotopes: ", 
+cat("Approximate m/z features part of 3-member isotope groups: ", 
   paste(round(iso_merged |> group_by(group_id) |> filter(n() == 3) |> pull(mz),3), collapse = ", "), "\n")
 
 cat("Approxiamte m/z features dropped during Cartilage ROI sparsity filtering: ", 
