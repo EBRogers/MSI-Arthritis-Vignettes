@@ -95,12 +95,7 @@ The base images can be regenerated with the commented code below, but it is very
 # 
 # save(sim_list_original, file = "sim_list_original.RData")
 
-sim_list_original_path <- file.path("Simulation-Data", "sim_list_original.RData")
-stopifnot(file.exists(sim_list_original_path))
-load(sim_list_original_path)
-stopifnot(exists("sim_list_original"))
-
-length(sim_list_original)
+load(file.path("Data", "Simulation-Data", "sim_list_original.RData"))
 ```
 
 # Define the feature-level effects and variance components
