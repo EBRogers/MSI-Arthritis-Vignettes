@@ -87,7 +87,10 @@ knitr::kable(samples)
 
 This layout is intentionally simple. The goal is not to reproduce every detail of the experimental design from the real data, but to create a structured setting where signal can be attached to condition, tissue, or both, and then tested after segmentation.
 
-# Create the simlation startinging images
+# Create the simulation starting images
+
+
+The code below was used to generate the base images for the Simulation 1 and 2. Theoretically it can be replicated with the code below, but the use of MulticoreParam and RNG seeds complicates random number generation, and may generate different results on different machines. We will instead load the images from the RData object supplied on MassIVE.
 
 ```{r load-simulation-base}
 

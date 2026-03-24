@@ -70,7 +70,7 @@ knitr::kable(samples)
 
 # Load the starting image objects
 
-The base images can be regenerated with the commented code below, but it is very time-consuming. We will simply load the images from the RData object supplied.
+The code below was used to generate the base images for the Simulation 1 and 2. Theoretically it can be replicated with the code below, but the use of MulticoreParam and RNG seeds complicates random number generation, and may generate different results on different machines. We will instead load the images from the RData object supplied on MassIVE.
 
 ```{r load-simulation-base}
 
@@ -521,15 +521,13 @@ ggarrange(
 ggsave(file.path("Recreated-Figures", "Figure-Variation-Simulation-2.png"), width = 11.5, height = 10, units = "in")
 ```
 
+# Pixels as replicates
 
+It is tempting to use pixels as replicates given the larger sample size than using sample means. Linear mixed-effects models, as well as most other linear models like ANOVA, linear regression, and t-tests, assume replicates are independent. As has been shown in previous work, pixels are not independent replicates; when substituted, they increase the sensitivity of models and hypothesis tests to the point that they become meaningless. We demonstrate this effect below. This section of the simulation code is computationally intense, and may not be suitable for all systems. Please proceed accordingly.
 
- # Pixels as replicates
+## Convert images to a pixel-level table
 
- It is tempting to use pixels as replicates given the larger sample size than using sample means. Linear mixed-effects models, as well as most other linear models like ANOVA, linear regression, and t-tests, assume replicates are independent. As has been shown in previous work, pixels are not independent replicates; when substituted, they increase the sensitivity of models and hypothesis tests to the point that they become meaningless. We demonstrate this effect below. This section of the simulation code is computationally intense, and may not be suitable for all systems. Please proceed accordingly.
-
- ## Convert images to a pixel-level table
-
- The following chunk converts each simulated image into long format, one row per pixel-feature combination, then appends sample metadata. Using `data.table` will help speed this process up and consume less memory. 
+The following chunk converts each simulated image into long format, one row per pixel-feature combination, then appends sample metadata. Using `data.table` will help speed this process up and consume less memory. 
 
 ```{r pixel-level-frame, results='hide', message=FALSE, warning=FALSE}
 results_list <- list()
@@ -594,7 +592,7 @@ Like its counterpart from the pixel means section above, this chunk uses a helpe
 3. marks each feature as significant or not,
 4. then classifies each result as a true/false positive/negative and returns counts by model/test/term
 
-```{r pixel-level-comparison-frame}
+```{r pixel-level-comparison-frame, warning=FALSE, message=FALSE}
 get_comparison_plotting_frame_pix_as_rep <- function(mse_frame, model_res, nmax = 150) {
   ttest_frame_condition <- mse_frame |>
     filter(tissue == "1") |>
