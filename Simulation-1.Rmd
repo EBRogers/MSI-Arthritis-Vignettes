@@ -92,7 +92,7 @@ This layout is intentionally simple. The goal is not to reproduce every detail o
 ```{r load-simulation-base}
 
 set.seed(123, kind = "L'Ecuyer-CMRG")
- sim_list_original <- list()
+sim_list_original <- list()
  for (i in 1:nrow(samples)) {
    sim_list_original[[i]] <- simulateImage(pdx,
                                            fdx, 
@@ -198,7 +198,15 @@ Negative means would be inconsistent with real world MSI data.
 We now define the actual pixels that make up the ROI and the background then apply the effects generated above.
 
 ```{r build-oracle-roi, message=FALSE, warning=FALSE}
-sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i) {
+utils_path <- normalizePath("SimulationUtilities.R")
+
+sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i,
+                                                                     sim_list_original,
+                                                                     pixel_sd,
+                                                                     effects_matrix_bg,
+                                                                     effects_matrix_c2,
+                                                                     utils_path) {
+  source(utils_path)
   m <- sim_list_original[[i]]
   runNames(m) <- paste0("run_", i)
 
@@ -236,7 +244,13 @@ sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i) {
     na.rm = TRUE,
     verbose = FALSE
   )
-}, BPPARAM = SnowfastParam(8))
+},
+sim_list_original = sim_list_original,
+pixel_sd = pixel_sd,
+effects_matrix_bg = effects_matrix_bg,
+effects_matrix_c2 = effects_matrix_c2,
+utils_path = utils_path,
+BPPARAM = SnowfastParam(8))
 ```
 
 # Segment the simulated images with two methods
