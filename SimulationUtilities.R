@@ -162,7 +162,7 @@ analyze_spatial_clusters <- function(sscl,
   #'
   #' @param sscl List of spatialShrunkenCentroids objects from Cardinal package
   #' @param sim_list_adj List of MSImagingExperiment objects from Cardinal package  
-  #' @param samples Data frame with columns: subject, subtissue, condition, id
+  #' @param samples Data frame with columns: subject, tissue, condition, id
   #' @param n_top_per_condition Number of top scoring clusters to select per condition (default: 4)
   #' @param n_top_features Number of top features to extract per cluster (default: 20)
   #' @param output_dir Directory name for saving images (default: "ssim_temp")
@@ -254,7 +254,7 @@ analyze_spatial_clusters_skm <- function(skml,
   #'
   #' @param skml List of spatialKMeans objects from Cardinal package
   #' @param sim_list_adj List of MSImagingExperiment objects from Cardinal package  
-  #' @param samples Data frame with columns: subject, subtissue, condition, id
+  #' @param samples Data frame with columns: subject, tissue, condition, id
   #' @param n_top_per_condition Number of top scoring clusters to select per condition (default: 4)
   #' @param n_top_features Number of top features to extract per cluster (default: 20)
   #' @param output_dir Directory name for saving images (default: "ssim_temp")
@@ -402,7 +402,7 @@ scale_row_sd_mean <- function(matrix, target_sd = 90, target_mean = NULL, verbos
 
 
 
-run_models <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|subject)", verbose = FALSE ) {
+run_models <- function(mse_frame, formu = "mean ~ condition * tissue + (1|subject)", verbose = FALSE ) {
   out <- list()
   model_results <-NULL
   models <- list()
@@ -459,7 +459,7 @@ run_models <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|sub
   
 }
 
-run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * subtissue + (1|subject)", batch_size = 50, verbose = FALSE) {
+run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * tissue + (1|subject)", batch_size = 50, verbose = FALSE) {
   out <- list()
   model_results <- NULL
   models <- list()
@@ -553,7 +553,7 @@ run_models_MEMORY_EFF <- function(mse_frame, formu = "mean ~ condition * subtiss
 get_comparison_plotting_frame <- function(mse_frame, model_res, nmax = 150) {
   ttest_frame_condition <- mse_frame %>% 
     arrange(feature_id) %>%
-    filter(subtissue == "1") %>%
+    filter(tissue == "1") %>%
     group_by(feature_id) %>% 
     group_modify(~tidy(t.test(mean ~ condition, data = .x, var.equal = T))) %>%
     ungroup() %>%
@@ -563,12 +563,12 @@ get_comparison_plotting_frame <- function(mse_frame, model_res, nmax = 150) {
            feature_id = row_number())
   
   
-  ttest_frame_subtissue <- mse_frame %>% 
+  ttest_frame_tissue <- mse_frame %>% 
     filter(condition == "1") %>%
     group_by(feature_id) %>% 
-    arrange(subtissue, subject) %>%
-    group_modify(~tidy(t.test(.x$mean[.x$subtissue == "0"],
-                              .x$mean[.x$subtissue == "1"],
+    arrange(tissue, subject) %>%
+    group_modify(~tidy(t.test(.x$mean[.x$tissue == "0"],
+                              .x$mean[.x$tissue == "1"],
                               paired = T))) %>%
     ungroup() %>%
     mutate(SE = estimate / statistic,
@@ -577,8 +577,8 @@ get_comparison_plotting_frame <- function(mse_frame, model_res, nmax = 150) {
            feature_id = row_number())
   
   contrasts_means <- bind_rows(lapply(model_res, FUN = function(m){
-    bind_rows(tidy(contrast(emmeans(m, ~ condition | subtissue, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename("subgroup"="subtissue"),
-              tidy(contrast(emmeans(m, ~ subtissue | condition, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename("subgroup"="condition")) 
+    bind_rows(tidy(contrast(emmeans(m, ~ condition | tissue, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename("subgroup"="tissue"),
+              tidy(contrast(emmeans(m, ~ tissue | condition, lmer.df = "satterthwaite"), "pairwise", adjust = "none")) %>% dplyr::rename("subgroup"="condition")) 
   })) %>% 
     group_by(term, subgroup) %>%
     mutate(feature_id = row_number(),
@@ -606,11 +606,11 @@ get_comparison_plotting_frame <- function(mse_frame, model_res, nmax = 150) {
              test = "T Test of Conditional Means",
              null = case_match(term,
                                "condition"~"In Medial:\nControl vs Osteoarthritis",
-                               "subtissue"~"In Osteoarthritis:\nLateral vs Medial"),
+                               "tissue"~"In Osteoarthritis:\nLateral vs Medial"),
              term = case_match(term,
                                "condition"~"Condition",
-                               "condition:subtissue"~"Interaction",
-                               "subtissue"~"Subsection")) %>%
+                               "condition:tissue"~"Interaction",
+                               "tissue"~"Subsection")) %>%
       dplyr::select(finding, n, model, test, null, term),
     
     ttest_frame_condition %>% 
@@ -634,7 +634,7 @@ get_comparison_plotting_frame <- function(mse_frame, model_res, nmax = 150) {
              term = "Condition") %>%
       dplyr::select(finding, n, model, test, null, term),
     
-    ttest_frame_subtissue %>% 
+    ttest_frame_tissue %>% 
       mutate(significant=`p.value`< 0.05,
              truth = ifelse(as.numeric(feature_id) > nmax,
                             TRUE,
@@ -649,7 +649,7 @@ get_comparison_plotting_frame <- function(mse_frame, model_res, nmax = 150) {
       group_by(finding,  .drop = FALSE) %>% 
       summarise(n=n(), .groups = "keep") %>%
       ungroup() %>%
-      mutate(model = "Linear Model of Paired Differences\nBetween Subtissues",
+      mutate(model = "Linear Model of Paired Differences\nBetween tissues",
              null = "In Osteoarthritis:\nLateral vs Medial",
              test = "Paired T Test",
              term = "Subsection") %>%
@@ -685,10 +685,10 @@ extract_data_for_modeling_alt <- function(sim_list, samples_df) {
     t <- as_tibble(fData(m)) %>% mutate(feature_id = 1:length(mz(m)),
                                         subject = samples_df[i,]$subject,
                                         condition = samples_df[i,]$condition,
-                                        subtissue = samples_df[i,]$subtissue
+                                        tissue = samples_df[i,]$tissue
     )
     mse_frame <- bind_rows(mse_frame,t)
   }
-  mse_frame <- mse_frame %>% mutate(across(c(subject, condition, subtissue), as.factor))
+  mse_frame <- mse_frame %>% mutate(across(c(subject, condition, tissue), as.factor))
   return(mse_frame)
 }

@@ -91,28 +91,28 @@ This layout is intentionally simple. The goal is not to reproduce every detail o
 
 ```{r load-simulation-base}
 
-set.seed(123, kind = "L'Ecuyer-CMRG")
-sim_list_original <- list()
- for (i in 1:nrow(samples)) {
-   sim_list_original[[i]] <- simulateImage(pdx,
-                                           fdx, 
-                                           sdpixel = pixel_sd, 
-                                           sdrun = 0, 
-                                           sdmz = 0, 
-                                           sdmult = 0, 
-                                           sdpeaks = 0, 
-                                           sdnoise = 0.0, 
-                                           SAR = FALSE, 
-                                           baseline = 0,
-                                           spcorr = 0.5,
-                                           centroided = TRUE, 
-                                           verbose = TRUE,
-                                           BPPARAM=SnowfastParam())
-}
+#set.seed(123, kind = "L'Ecuyer-CMRG")
+#sim_list_original <- list()
+# for (i in 1:nrow(samples)) {
+#   sim_list_original[[i]] <- simulateImage(pdx,
+#                                           fdx, 
+#                                           sdpixel = pixel_sd, 
+#                                           sdrun = 0, 
+#                                           sdmz = 0, 
+#                                           sdmult = 0, 
+#                                           sdpeaks = 0, 
+#                                           sdnoise = 0.0, 
+#                                           SAR = FALSE, 
+#                                           baseline = 0,
+#                                           spcorr = 0.5,
+#                                           centroided = TRUE, 
+#                                           verbose = TRUE,
+#                                           BPPARAM=SnowfastParam())
+#}
 
-save(sim_list_original, file = file.path("Simulation-Data", "sim_list_original.RData"))
+#save(sim_list_original, file = file.path("Simulation-Data", "sim_list_original.RData"))
 
-#load(file.path("Simulation-Data","sim_list_original.RData"))
+load(file.path("Simulation-Data","sim_list_original.RData"))
 length(sim_list_original)
 ```
 
@@ -646,6 +646,11 @@ knitr::include_graphics(ssc_venn_roidiff_file)
 The same, but for SKM.
 
 ```{r, fig.width=8, fig.height=8, results='hide', message=FALSE, warning=FALSE}
+
+skm_control_charting_sample <- skml_7c[[which(samples$id == control_sample_id)]]
+skm_trt_charting_sample <- skml_7c[[which(samples$id == trt_sample_id)]]
+
+
 skm_venn_roidef_args <- list(
   x = list(topFeatures(skm_control_charting_sample, n = 100)$i,
            topFeatures(skm_trt_charting_sample, n = 100)$i,
