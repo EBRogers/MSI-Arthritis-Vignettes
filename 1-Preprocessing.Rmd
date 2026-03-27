@@ -449,7 +449,7 @@ sdgmm <- spatialDGMM(cartilage_features,
                        weights = "adaptive",
                        verbose = F)
 
-cartilage_vector <- case_match(as.character(sdgmm$class[[1]]),
+cartilage_vector <- recode_values(as.character(sdgmm$class[[1]]),
                                "5" ~ "other", 
                                "4" ~ "other",
                                "3" ~ "other", 
@@ -513,7 +513,7 @@ sdgmm <- spatialDGMM(background_and_bone_features_condensed,
                      weights = "adaptive",
                      verbose = F)
 
-bone_background_vector <- case_match(as.character(sdgmm$class[[1]]), 
+bone_background_vector <- recode_values(as.character(sdgmm$class[[1]]), 
                                      "4" ~ "bone",
                                      "3" ~ "background", 
                                      "2" ~ "background", 
@@ -596,7 +596,7 @@ mse_list_segmented <- BiocParallel::bplapply(
     ## --- cartilage vs other ---
     cartilage_features <- mse[cartilage_feature_ids, ]
 
-
+    set.seed(12345)
     sdgmm1 <- spatialDGMM(
           cartilage_features,
           k = 5,
@@ -605,7 +605,7 @@ mse_list_segmented <- BiocParallel::bplapply(
           verbose = F
         )
 
-      cartilage_vector <- case_match(
+      cartilage_vector <- recode_values(
         as.character(sdgmm1$class[[1]]),
         "5" ~ "other",
         "4" ~ "other",
@@ -634,6 +634,7 @@ mse_list_segmented <- BiocParallel::bplapply(
       na.rm = TRUE
     )
 
+    set.seed(12345)
     sdgmm2 <- spatialDGMM(
       background_and_bone_features_condensed,
       k = 4,
@@ -642,7 +643,7 @@ mse_list_segmented <- BiocParallel::bplapply(
       verbose = FALSE
     )
 
-    bone_background_vector <- case_match(
+    bone_background_vector <- recode_values(
       as.character(sdgmm2$class[[1]]),
       "4" ~ "bone",
       "3" ~ "background",
@@ -689,14 +690,88 @@ roi_list <- hc_class_plotting_frame[, .(x, y, run, tissue_zone)]
 save(roi_list, file = file.path("Outputs", "roi_list.Rdata"))
 ```
 
+## Benchmark: segmentation with spatial shrunken centroids
+
+To illustrate the effect of segmentation method on P values, we will compare the single ion segmentation of the OA dataset to segmentation results from multivariate segmentation methods, specifically spatial shrunken centroids. Multiple values of `k` and `s` were tested. Segmentation did not meaningfully improve past `k=5` and there were minimal differences between different values of `s`, thus it was kept to `s = 0` (the default). Even still, several tissues demonstrated poor segmentation of cartilage. Additionally, as multivariate segmentation begins with random class allocation, it will not produce the same class labels for each tissue. Therefore, the author has annotated them, include situation when multiple classes must be combined into one to form cartilage. We will use these results at the end of the vignette to evaluate at sensitivity of T tests between conditions when performed on ROIs segmented with differernt methods. .
+```{r}
+bp <- SnowfastParam(workers = 16L, force.GC = TRUE)
+
+sscs <- BiocParallel::bplapply(
+  mse_list_pp,
+  function(mse) {
+    set.seed(54321)
+    # bug in matter - needs to be here for now
+    setMethod("as.vector", "sparse_arr",
+      function(x, mode = "any") {
+        if ( mode != "any" )
+        matter::type(x) <- mode
+        y <- as.vector(x[])
+        names(y) <- NULL
+        y
+      })
+
+    ssc <- spatialShrunkenCentroids(mse, k = 5, weights = "adaptive")
+    ssc
+  },
+  BPPARAM = bp
+)
+
+manage_directory("sscs")
+
+for (ssc in names(sscs)) {
+  image_png(sscs[[ssc]], "class", filename = file.path("sscs", paste0("ssc_",ssc,".png")))
+}
+
+
+
+mvs_cartilage_class <- list("6891-OA-lateral" = c(3), 
+                        "6891-OA-medial" = c(4),
+                        "6908-OA-lateral" = c(3),
+                        "6908-OA-medial" = c(5),
+                        "6919-CAD-lateral" = c(5), 
+                        "6919-CAD-medial" = c(3),
+                        "6924-CAD-lateral" = c(3,5),
+                        "6924-CAD-medial" = c(4),
+                        "6938-CAD-lateral" = c(1),
+                        "6938-CAD-medial" = c(3),
+                        "6944-CAD-lateral" = c(2),
+                        "6944-CAD-medial" = c(1),
+                        "6949-OA-lateral" = c(2),
+                        "6949-OA-medial" = c(4),
+                        "6954-OA-lateral" = c(3),
+                        "6954-OA-medial" = c(3))
+
+pdata_list_mvs <- lapply(names(mse_list_pp), function(nm) {
+  class_vec <- sscs[[nm]]$class
+  mse_list_pp[[nm]]$tissue_zone_mvs <- ifelse( class_vec %in% mvs_cartilage_class[[nm]] ,"cartilage","other")
+  dt <- as.data.table(pData(mse_list_pp[[nm]]))
+  dt[, id := nm]
+  dt
+})
+
+hc_class_plotting_frame_mvs <- rbindlist(pdata_list_mvs)
+roi_list_mvs <- hc_class_plotting_frame_mvs[, .(x, y, run, tissue_zone_mvs)]
+
+save(roi_list_mvs, file = file.path("Outputs", "roi_list_mvs.Rdata"))
+
+plt <- ggplot(hc_class_plotting_frame_mvs |> 
+         left_join(name_tibble, by = join_by(run)), 
+       aes(x = x, y = -1*y, fill = tissue_zone_mvs)) + 
+  geom_tile() +
+  theme_void() +
+  facet_wrap("tid", scales = "free", ncol = 2) +
+  scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none") +
+  labs(fill = "ROI")
+```
+
+
 Visualization of all samples' ROIs.
 
 ```{r vis_class_all_samples, fig.asp=2, fig.width=3.5}
-
-
 ggplot(hc_class_plotting_frame |> 
          left_join(name_tibble, by = join_by(run)) |>
-         mutate(roi = case_match(tissue_zone, 
+         mutate(roi = recode_values(tissue_zone, 
                                  "bone" ~ "Bone",
                                  "background" ~ "Background",
                                  "cartilage" ~ "Cartilage")), 
@@ -712,13 +787,13 @@ ggplot(hc_class_plotting_frame |>
 
 ## Why not segment all runs at the same time?
 
-A better approach would be to run the sDGMM segmentation on the single `MSImagingExperiment` object, thereby forcing the algorithm to consider every run's spatial distribution in unison. This could potentially make segmentation more comparable across runs but may also overfit to intensity differences that would have been corrected during normalization. As the peaks used for background/bone segmentation were the mass calibrants (that must be removed before median or TIC normalization, or become uninformative after being used as a reference during reference normalization) we could not conduct segmentation after normalization.
+A better approach would be to run the sDGMM segmentation on the single `MSImagingExperiment` object, thereby forcing the algorithm to consider every run's spatial distribution in unison. This could potentially make segmentation more comparable across runs but would also overfit to both technical noise (intensity differences that would have been corrected during normalization) and biological differences caused by experimental groups. This would confound the intended effect we want to study, so instead we will cluster independently. 
 
 ```{r fig-ROI, results='hide', warning=FALSE, message=FALSE, echo=FALSE}
 p <- ggplot(hc_class_plotting_frame |> 
          left_join(name_tibble) |>
          filter(condition=="Control") |>
-         mutate(roi = case_match(tissue_zone, 
+         mutate(roi = recode_values(tissue_zone, 
                                  "bone" ~ "Bone",
                                  "background" ~ "Background",
                                  "cartilage" ~ "Cartilage")), 
@@ -738,7 +813,7 @@ ggsave(file.path("Recreated-Figures",
 p <- ggplot(hc_class_plotting_frame |> 
     left_join(name_tibble) |>
     filter(condition=="Osteoarthritis") |>
-         mutate(roi = case_match(tissue_zone, 
+         mutate(roi = recode_values(tissue_zone, 
                                  "bone" ~ "Bone",
                                  "background" ~ "Background",
                                  "cartilage" ~ "Cartilage"),
@@ -791,7 +866,7 @@ p <- bind_cols(as_tibble(pData(m)), mi) |>
                names_prefix = "feature_",
                names_to = "mz",
                values_to = "intensity") |>
-  mutate(tissue_zone_recode = case_match(tissue_zone, 
+  mutate(tissue_zone_recode = recode_values(tissue_zone, 
                                          "background" ~ "Background",
                                          "bone" ~ "Bone",
                                          "cartilage" ~ "Cartilage",),
@@ -983,7 +1058,9 @@ print(plot(normalized, "mean",
      grid = F))
 
 dev.off()
+```
 
+```{r, warning=FALSE, message=FALSE}
 knitr::kable(normalized |>
   subsetPixels(run == "6891-OA-lateral") |>
   summarizeFeatures(stat = c("mean", "sd"), na.rm = T) |>
@@ -992,4 +1069,105 @@ knitr::kable(normalized |>
   filter(mean != 0 | sd != 0) |>
   mutate(cv = sd/mean) |>
   summarise(mean_cv = mean(cv, na.rm = T)))
+```
+
+```{r}
+# load both ROI Lists
+load(file.path("Outputs", "roi_list.Rdata"))
+load(file.path("Outputs", "roi_list_mvs.Rdata"))
+
+mse_norm <- readMSIData(file.path("Data",
+                                        "Preprocessing",
+                                        "normalized.imzML")) |>
+      addProcessing(zero_to_na, label="zero_to_na_before_filtering") |>
+      process(spectra="intensity", index="mz", 
+                BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
+                verbose = F)
+
+#bring into memory to make it faster
+
+intensity(mse_norm) <- as.matrix(intensity(mse_norm))
+
+pData(mse_norm)$tissue_zone <- as.data.table(pData(mse_norm)) |>
+  left_join(roi_list, by = c("x","y","run")) |>
+  dplyr::pull(tissue_zone)
+
+pData(mse_norm)$tissue_zone_mvs <- as.data.table(pData(mse_norm)) |>
+  left_join(roi_list_mvs, by = c("x","y","run")) |>
+  dplyr::pull(tissue_zone_mvs)
+
+get_mse_frame <- function(mse_summ){
+  mse_summ |>
+  fData() |>
+  as_tibble() |>
+  mutate(feature_id = row_number()) |>
+  tidyr::pivot_longer(
+    X6891.OA.lateral.mean:X6954.OA.medial.mean,
+    names_to = "run",
+    values_to = "cartilage.mean",
+    names_pattern = "X(.+)\\.mean$",
+    names_transform = list(run = ~ stringr::str_replace_all(.x, "\\.", "-"))
+  ) |>
+  left_join(name_tibble, by = join_by(run)) |>
+  mutate_at(vars(feature_id, subject, condition, tissue), factor) |> 
+  arrange(feature_id, condition, tissue, subject) |> 
+  select(feature_id, mz, run, cartilage.mean, subject, condition, tissue) |>
+  filter(tissue == "Medial")
+} 
+
+
+mse_cartilage <- mse_norm |>
+  subsetPixels(tissue_zone == "cartilage")
+
+
+mse_frame <-  summarizeFeatures(mse_cartilage, 
+      stat = "mean", 
+      na.rm = T, 
+      group = mse_cartilage$run) |>
+      get_mse_frame()
+
+mse_cartilage_mvs <- mse_norm |>
+  subsetPixels(tissue_zone_mvs == "cartilage")
+
+mse_frame_mvs <-  summarizeFeatures(mse_cartilage_mvs, 
+      stat = "mean", 
+      na.rm = T, 
+      group = mse_cartilage_mvs$run) |>
+      get_mse_frame()
+
+modeling_frame <- mse_frame |>
+  mutate(cartilage.mean.mvs = mse_frame_mvs$cartilage.mean)
+
+library(purrr)
+library(broom)
+
+results <- modeling_frame %>%
+  group_by(feature_id) %>%
+  summarise(
+    # t-test for cartilage.mean ~ condition
+    t1 = list(tidy(t.test(cartilage.mean ~ condition, var.equal = T))),
+    # t-test for cartialge.mean.mvs ~ condition
+    t2 = list(tidy(t.test(cartilage.mean.mvs ~ condition, var.equal = T))),
+    .groups = "drop"
+  ) %>%
+  tidyr::unnest(t1) %>%
+  tidyr::unnest(t2, names_sep = ".mvs")
+
+results |>
+  ggplot(aes(x = -log10(p.value), y = -log10(t2.mvsp.value))) +
+  geom_hex(bins = 38) +
+  scale_fill_gradient(low = "#ffe6e4f7", high = "#8e0315") +
+  geom_abline(intercept = 0, slope = 1) +
+  #lims(x = c(0,1.9), y = c(0,1.9)) +
+  labs(x = "Univariate segmentation of representitive markers: -log10(P value)",
+        y = "Multivaratie Segmentation with all features: -log10(P value)",
+        fill = "Count") + 
+  #ggtitle("P values from T tests between conditions in cartilage\nROIs defined by single ion or multivariate segmentation") +
+  stat_smooth(method = "lm") + 
+  theme_minimal() +
+  coord_equal() +
+  ggpubr::stat_regline_equation(aes(label = ..eq.label..), label.x = 1.25, label.y = .15, color = "blue")
+
+ggsave(file.path("Recreated-Figures", "Figure-ROI-Segmentation-Method-P-Values.png"), height = 5.0, width = 5.3)
+
 ```

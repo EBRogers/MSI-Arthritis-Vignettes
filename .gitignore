@@ -29,3 +29,4 @@ massive_upload_completed.log
 run-sims.R
 Simulation-Data/sim_list_original-ORIGINAL.RData
 renv.lock
+/sscs

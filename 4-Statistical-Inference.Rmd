@@ -290,7 +290,7 @@ signift_cartilage |>
           Std.Error = round(SE, 3),
           `P Value` = round(p.value, 3),
           `FDR Adj. P value` = round(p_value_fdr, 3)) |>
-  select(`M/Z`, Estimate, Std, `P Value`, `FDR Adj. P value`) |> 
+  select(`M/Z`, Estimate, Std.Error, `P Value`, `FDR Adj. P value`) |> 
   arrange(`P Value`) |>
   knitr::kable()
 
@@ -303,7 +303,7 @@ signift_cartilage |>
           Std.Error = round(SE, 3),
           `P Value` = round(p.value, 3),
           `FDR Adj. P value` = round(p_value_fdr, 3)) |>
-  select(`M/Z`, Estimate, Std, `P Value`, `FDR Adj. P value`) |> 
+  select(`M/Z`, Estimate, Std.Error, `P Value`, `FDR Adj. P value`) |> 
   arrange(`P Value`) |>
   knitr::kable()
 ```

@@ -483,13 +483,13 @@ var_boxplots <- ggarrange(var_condition, var_tissue, ncol = 2) |>
             fig.lab = "D",
             fig.lab.size = 20,
             fig.lab.face = "bold") +
-theme(panel.border = element_rect(colour = "black", fill=NA, linewidth=0.5))
+theme(panel.border = element_rect(colour = "#999999", fill=NA, linewidth=0.25))
 
 qqs <- annotate_figure(qqs, top = "Quantile-quantile plots of residuals",
             fig.lab = "A",
             fig.lab.size = 20,
             fig.lab.face = "bold") +
-theme(panel.border = element_rect(colour = "black", fill=NA, linewidth=0.5))
+theme(panel.border = element_rect(colour = "#999999", fill=NA, linewidth=0.25))
 
 boxps <- itx_fancy(tmp_df)
 
@@ -497,13 +497,13 @@ boxps <- annotate_figure(boxps, top = "Mean intensity by tissue and condition",
             fig.lab = "B",
             fig.lab.size = 20,
             fig.lab.face = "bold")+
-theme(panel.border = element_rect(colour = "black", fill=NA, linewidth=0.5))
+theme(panel.border = element_rect(colour = "#999999", fill=NA, linewidth=0.25))
 
 sii_plot <- annotate_figure(sii(f), top = "Single ion images with cartilage highlighted",
             fig.lab = "C",
             fig.lab.size = 20,
             fig.lab.face = "bold")+
-theme(panel.border = element_rect(colour = "black", fill=NA, linewidth=0.5))
+theme(panel.border = element_rect(colour = "#999999", fill=NA, linewidth=0.25))
 
 ggarr <- ggarrange(ggarrange(qqs, 
                               boxps, 

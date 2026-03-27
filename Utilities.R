@@ -73,6 +73,30 @@ manage_directory <- function(path) {
   }
 }
 
+image_png <- function(object, ..., filename = "image.png",
+          width = 1000, height = 800, pointsize = 24,
+          res = NA, units = "px", bg = "white") {
+  # Create output directory if needed
+  dir_path <- dirname(filename)
+  if (dir_path != "." && !dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE)
+  }
+
+  # Open device
+  if (is.na(res)) {
+    png(filename = filename, width = width, height = height,
+      pointsize = pointsize, units = units, bg = bg)
+  } else {
+    png(filename = filename, width = width, height = height,
+      pointsize = pointsize, res = res, units = units, bg = bg)
+  }
+  on.exit(dev.off(), add = TRUE)
+
+  p <- Cardinal::image(object, ...)
+  print(p)
+  invisible(p)
+}
+
 #### MSE write functions ####
 
 generate_dir_structure <- function(root) {
