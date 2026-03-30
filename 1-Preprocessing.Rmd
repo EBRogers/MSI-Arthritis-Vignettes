@@ -1071,8 +1071,8 @@ knitr::kable(normalized |>
   summarise(mean_cv = mean(cv, na.rm = T)))
 ```
 
+For the figure comparing p-values from t-tests between ROIs created with univariate segmentation vs. multivariate segmentation, we will test each feature. These steps will be covered in greater detail later.
 ```{r}
-# load both ROI Lists
 load(file.path("Outputs", "roi_list.Rdata"))
 load(file.path("Outputs", "roi_list_mvs.Rdata"))
 
@@ -1083,10 +1083,6 @@ mse_norm <- readMSIData(file.path("Data",
       process(spectra="intensity", index="mz", 
                 BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
                 verbose = F)
-
-#bring into memory to make it faster
-
-intensity(mse_norm) <- as.matrix(intensity(mse_norm))
 
 pData(mse_norm)$tissue_zone <- as.data.table(pData(mse_norm)) |>
   left_join(roi_list, by = c("x","y","run")) |>
@@ -1144,9 +1140,7 @@ library(broom)
 results <- modeling_frame %>%
   group_by(feature_id) %>%
   summarise(
-    # t-test for cartilage.mean ~ condition
     t1 = list(tidy(t.test(cartilage.mean ~ condition, var.equal = T))),
-    # t-test for cartialge.mean.mvs ~ condition
     t2 = list(tidy(t.test(cartilage.mean.mvs ~ condition, var.equal = T))),
     .groups = "drop"
   ) %>%
@@ -1158,16 +1152,13 @@ results |>
   geom_hex(bins = 38) +
   scale_fill_gradient(low = "#ffe6e4f7", high = "#8e0315") +
   geom_abline(intercept = 0, slope = 1) +
-  #lims(x = c(0,1.9), y = c(0,1.9)) +
   labs(x = "Univariate segmentation of representitive markers: -log10(P value)",
         y = "Multivaratie Segmentation with all features: -log10(P value)",
         fill = "Count") + 
-  #ggtitle("P values from T tests between conditions in cartilage\nROIs defined by single ion or multivariate segmentation") +
   stat_smooth(method = "lm") + 
   theme_minimal() +
   coord_equal() +
   ggpubr::stat_regline_equation(aes(label = ..eq.label..), label.x = 1.25, label.y = .15, color = "blue")
 
 ggsave(file.path("Recreated-Figures", "Figure-ROI-Segmentation-Method-P-Values.png"), height = 5.0, width = 5.3)
-
 ```
