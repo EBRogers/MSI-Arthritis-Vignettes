@@ -1,6 +1,9 @@
 ---
 title: "Simulation-1"
-output: html_document
+author: "Ethan Rogers"
+date: "03/20/2026"
+output:
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}

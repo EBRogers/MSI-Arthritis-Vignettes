@@ -50,11 +50,68 @@ This workflow requires the following packages and their dependencies:
 
 In order to run this workflow, we need to download the dataset raw .imzML files. This workflow is written to look for data in the `./Data` directory in the working directory.
 
-First, create this directory. You can do this in bash or zsh by running this command while in your working directory (the same as the preferred directory from above):
+You can create it manually, or run the following R code. If they exist already, they will not be overwritten. 
 
+```{r}
+dirs <- c(
+  file.path(".", "Data"),
+  file.path(".", "Data", "Raw"),
+  file.path(".", "Data", "Filtering-Aggregation"),
+  file.path(".", "Data", "Preprocessing"),
+  file.path(".", "Data", "Simulation-Data"),
+  file.path(".", "Outputs"),
+  file.path(".", "Recreated-Figures")
+)
+
+for (d in dirs) {
+  dir.create(d, showWarnings = FALSE, recursive = TRUE)
+}
 ```
-cd your/preferred/directory
-mkdir Data
-```
+
 
 The original dataset in Bruker .d format can be found on MassIVE via ID number: [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb). The reanalysis container holds all intermediates, including raw .imzML images that will be used for this analysis.
+
+You can download all of them, or specific files:
+
+```{r}
+ftp_url <- "ftp://massive-ftp.ucsd.edu/v07/MSV000094448/"
+
+file_list <- readLines(url(ftp_url))
+
+# Parse filenames
+filenames <- trimws(sub(".*\\s+", "", file_list))
+filenames <- filenames[filenames != "" & !filenames %in% c(".", "..")]
+
+# make destination dir if it doesn't exist
+dest_dir <- file.path(".", "Data")
+dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
+
+# Download each file
+for (f in filenames) {
+  remote <- paste0(ftp_url, f)
+  local  <- file.path(dest_dir, f)
+  temp   <- paste0(local, ".part")
+  
+  # Skip if the final file already exists
+  if (file.exists(local)) {
+    message("Already exists, skipping: ", f)
+    next
+  }
+  
+  # Remove any partial download from a previous interrupted attempt
+  if (file.exists(temp)) {
+    file.remove(temp)
+  }
+  
+  message("Downloading: ", f)
+  tryCatch({
+    download.file(remote, destfile = temp, mode = "wb", method = "libcurl")
+    # Only rename to final name if download completed successfully
+    file.rename(temp, local)
+  }, error = function(e) {
+    message("Failed to download: ", f, " - ", conditionMessage(e))
+    # Clean up partial file
+    if (file.exists(temp)) file.remove(temp)
+  })
+}
+```
