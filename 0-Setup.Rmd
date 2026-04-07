@@ -98,53 +98,42 @@ source("S3Utilities.R")
 ```
 
 ### Run the download
-The following code iterates over your selected directories, lists the files in each from the S3 bucket, and downloads them.
+The following code iterates over your selected directories, lists the files in each from the S3 bucket, and downloads them. Change `dry_run` to `FALSE` to download the files selected from above.
 
-```
+```{r}
+dry_run <- TRUE
+
 selected <- names(download_dirs)[unlist(download_dirs)]
 
 for (prefix in selected) {
   message("\n--- Listing: ", prefix, " ---")
-  
-  # Ensure the prefix ends with / so we only get objects inside it
   query_prefix <- ifelse(grepl("/$", prefix), prefix, paste0(prefix, "/"))
   objects <- s3_list_objects(base_url, query_prefix)
-  
+
   if (nrow(objects) == 0) {
     message("  No files found for prefix: ", prefix)
     next
   }
-  
+
   total_size <- sum(objects$size)
-  
-  # Check how many already exist locally
-  already_exist <- vapply(objects$key, function(k) {
-    file.exists(file.path(".", k))
-  }, logical(1))
+  already_exist <- vapply(objects$key, function(k) file.exists(file.path(".", k)), logical(1))
   n_skip <- sum(already_exist)
   n_todo <- nrow(objects) - n_skip
-  
+
   message(sprintf("  %d files (%s total), %d to download, %d already present",
                   nrow(objects), human_size(total_size), n_todo, n_skip))
-  
-  if (n_todo == 0) {
-    message("  All files already downloaded, skipping.")
-    next
-  }
-  
-  for (i in seq_len(nrow(objects))) {
-    key  <- objects$key[i]
-    size <- objects$size[i]
-    
-    if (file.exists(file.path(".", key))) next
-    
-    message(sprintf("  [%d/%d] %s (%s)",
-                    i, nrow(objects), basename(key), human_size(size)))
-    s3_download_file(base_url, key, dest_dir = ".")
-  }
-  
-  message("  Done: ", prefix)
-}
 
-message("\nAll downloads complete.")
+  for (i in seq_len(nrow(objects))) {
+    key <- objects$key[i]
+    size <- objects$size[i]
+    if (file.exists(file.path(".", key))) next
+
+    if (dry_run) {
+      message(sprintf("  [DRY RUN %d/%d] would download: %s (%s)",
+                      i, nrow(objects), basename(key), human_size(size)))
+    } else {
+      s3_download_file(base_url, key, dest_dir = ".")
+    }
+  }
+}
 ```
