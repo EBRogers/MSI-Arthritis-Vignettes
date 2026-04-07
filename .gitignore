@@ -30,3 +30,4 @@ renv.lock
 /sscs
 Arthritis-Project-Preprocessing-Code
 Simulation-Data
+s3_upload.sh

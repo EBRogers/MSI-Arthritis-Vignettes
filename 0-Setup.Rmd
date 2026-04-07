@@ -36,6 +36,7 @@ renv::init(bioconductor = TRUE)
 ```
 
 This workflow requires the following packages and their dependencies:
+
 - Cardinal
 - dplyr, tibble, tidyr, and ggplot2
 - data.table
@@ -46,12 +47,12 @@ This workflow requires the following packages and their dependencies:
 
 `renv` will automatically detect the `renv.lock` file in the main directory, which will tell it to install the packages above and their dependencies. To commence this process, run the following:
 
-## Download data from MassIVE
+## Download data from S3
+The original dataset in Bruker .d format can be found on MassIVE via ID number: [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb). Due to some technical issues with MassIVE and .imzML files, we have stored the converted raw files and all intermediates created from this analysis in an public Amazon S3 bucket. Files can be downloaded directly over HTTPS — no AWS account, credentials, or additional software is required.
 
-In order to run this workflow, we need to download the dataset raw .imzML files. This workflow is written to look for data in the `./Data` directory in the working directory.
+This workflow is written to look for data in the `./Data` directory, with specific steps having sub directories. If these already exist this code will do nothing, otherwise we will create them.
 
-You can create it manually, or run the following R code. If they exist already, they will not be overwritten. 
-
+### Create local directories
 ```{r}
 dirs <- c(
   file.path(".", "Data"),
@@ -68,50 +69,82 @@ for (d in dirs) {
 }
 ```
 
+### Select which data to download
 
-The original dataset in Bruker .d format can be found on MassIVE via ID number: [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb). The reanalysis container holds all intermediates, including raw .imzML images that will be used for this analysis.
-
-You can download all of them, or specific files:
+You do not need to download everything. Set any of the following to `FALSE` to skip that directory. At minimum, you will need `Raw` and `Simulation-Data` to run the full workflow from scratch, or the later intermediates to reproduce specific steps. T
 
 ```{r}
-ftp_url <- "ftp://massive-ftp.ucsd.edu/v07/MSV000094448/"
+download_dirs <- list(
+  "Data/Raw"                        = TRUE,
+  "Data/Preprocessing/Smoothed-BLR-Recalibrated" = TRUE,
+  "Data/Preprocessing/Individual-Picked-Aligned-Filtered" = TRUE,
+  "Data/Preprocessing/Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML" = TRUE,
+  "Data/Preprocessing/normalized.imzML" = TRUE,
+  "Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML" = TRUE,
+  "Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML" = TRUE,
+  "Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML" = TRUE,
+  "Data/Simulation-Data"            = TRUE
+)
+```
 
-file_list <- readLines(url(ftp_url))
+### Download helper functions
 
-# Parse filenames
-filenames <- trimws(sub(".*\\s+", "", file_list))
-filenames <- filenames[filenames != "" & !filenames %in% c(".", "..")]
+The following functions list and download files from the public S3 bucket using only base R. No additional packages are needed.
 
-# make destination dir if it doesn't exist
-dest_dir <- file.path(".", "Data")
-dir.create(dest_dir, showWarnings = FALSE, recursive = TRUE)
+```{r}
+bucket    <- "preprint-msi-arthtitis-data"
+base_url  <- paste0("https://", bucket, ".s3.amazonaws.com")
+source("S3Utilities.R")
+```
 
-# Download each file
-for (f in filenames) {
-  remote <- paste0(ftp_url, f)
-  local  <- file.path(dest_dir, f)
-  temp   <- paste0(local, ".part")
+### Run the download
+The following code iterates over your selected directories, lists the files in each from the S3 bucket, and downloads them.
+
+```
+selected <- names(download_dirs)[unlist(download_dirs)]
+
+for (prefix in selected) {
+  message("\n--- Listing: ", prefix, " ---")
   
-  # Skip if the final file already exists
-  if (file.exists(local)) {
-    message("Already exists, skipping: ", f)
+  # Ensure the prefix ends with / so we only get objects inside it
+  query_prefix <- ifelse(grepl("/$", prefix), prefix, paste0(prefix, "/"))
+  objects <- s3_list_objects(base_url, query_prefix)
+  
+  if (nrow(objects) == 0) {
+    message("  No files found for prefix: ", prefix)
     next
   }
   
-  # Remove any partial download from a previous interrupted attempt
-  if (file.exists(temp)) {
-    file.remove(temp)
+  total_size <- sum(objects$size)
+  
+  # Check how many already exist locally
+  already_exist <- vapply(objects$key, function(k) {
+    file.exists(file.path(".", k))
+  }, logical(1))
+  n_skip <- sum(already_exist)
+  n_todo <- nrow(objects) - n_skip
+  
+  message(sprintf("  %d files (%s total), %d to download, %d already present",
+                  nrow(objects), human_size(total_size), n_todo, n_skip))
+  
+  if (n_todo == 0) {
+    message("  All files already downloaded, skipping.")
+    next
   }
   
-  message("Downloading: ", f)
-  tryCatch({
-    download.file(remote, destfile = temp, mode = "wb", method = "libcurl")
-    # Only rename to final name if download completed successfully
-    file.rename(temp, local)
-  }, error = function(e) {
-    message("Failed to download: ", f, " - ", conditionMessage(e))
-    # Clean up partial file
-    if (file.exists(temp)) file.remove(temp)
-  })
+  for (i in seq_len(nrow(objects))) {
+    key  <- objects$key[i]
+    size <- objects$size[i]
+    
+    if (file.exists(file.path(".", key))) next
+    
+    message(sprintf("  [%d/%d] %s (%s)",
+                    i, nrow(objects), basename(key), human_size(size)))
+    s3_download_file(base_url, key, dest_dir = ".")
+  }
+  
+  message("  Done: ", prefix)
 }
+
+message("\nAll downloads complete.")
 ```
