@@ -9,7 +9,6 @@
 /OLD
 /super_image*
 MSI_Arthritis_Vignettes.Rproj
-*.html
 *.DS_Store
 Outputs/super_image_708_for_mzClustering.txt
 Outputs/super_image_708_for_DeepION.txt
