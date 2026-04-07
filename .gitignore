@@ -18,7 +18,6 @@ Outputs/mz_vector_for_DeepION.txt
 knit_preprocessing.sh
 /QQ-Itx-Sii-Plots
 /Outputs-OLD
-/Recreated-Figures/*.png
 /Arthritis-Project-Preprocessing-Code
 renv.lock
 Simulation-Data/sim_list_original.RData
@@ -29,3 +28,5 @@ run-sims.R
 Simulation-Data/sim_list_original-ORIGINAL.RData
 renv.lock
 /sscs
+Arthritis-Project-Preprocessing-Code
+Simulation-Data
