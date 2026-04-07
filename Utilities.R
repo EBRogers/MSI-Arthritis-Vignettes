@@ -10,23 +10,23 @@ CONDITIONS <- c("Control", "Osteoarthritis")
 TISSUES <- c("lateral", "medial") 
 
 name_tibble <- tribble(
-  ~run,               ~subject, ~condition,        ~tissue,
-  '6919-CAD-lateral',  1,       'Control',         'Lateral',
-  '6919-CAD-medial',   1,       'Control',         'Medial',
-  '6924-CAD-lateral',  2,       'Control',         'Lateral',
-  '6924-CAD-medial',   2,       'Control',         'Medial',
-  '6938-CAD-lateral',  3,       'Control',         'Lateral',
-  '6938-CAD-medial',   3,       'Control',         'Medial',
-  '6944-CAD-lateral',  4,       'Control',         'Lateral',
-  '6944-CAD-medial',   4,       'Control',         'Medial',
-  '6891-OA-lateral',   5,       'Osteoarthritis',  'Lateral',
-  '6891-OA-medial',    5,       'Osteoarthritis',  'Medial',
-  '6908-OA-lateral',   6,       'Osteoarthritis',  'Lateral',
-  '6908-OA-medial',    6,       'Osteoarthritis',  'Medial',
-  '6949-OA-lateral',   7,       'Osteoarthritis',  'Lateral',
-  '6949-OA-medial',    7,       'Osteoarthritis',  'Medial',
-  '6954-OA-lateral',   8,       'Osteoarthritis',  'Lateral',
-  '6954-OA-medial',    8,       'Osteoarthritis',  'Medial'
+  ~run,               ~subject, ~condition,        ~tissue,      ~raw_filename,
+  '6919-CAD-lateral',  1,       'Control',         'Lateral',    '6919b_lat_cad.imzML',
+  '6919-CAD-medial',   1,       'Control',         'Medial',     '6919a_med_cad.imzML',
+  '6924-CAD-lateral',  2,       'Control',         'Lateral',    '6924a_lat_cad.imzML',
+  '6924-CAD-medial',   2,       'Control',         'Medial',     '6924b_med_cad.imzML',
+  '6938-CAD-lateral',  3,       'Control',         'Lateral',    '6938b_lat_cad.imzML',
+  '6938-CAD-medial',   3,       'Control',         'Medial',     '6938a_med_cad.imzML',
+  '6944-CAD-lateral',  4,       'Control',         'Lateral',    '6944b_lat_cad.imzML',
+  '6944-CAD-medial',   4,       'Control',         'Medial',     '6944a_med_cad.imzML',
+  '6891-OA-lateral',   5,       'Osteoarthritis',  'Lateral',    '6891a_lat_oa.imzML',
+  '6891-OA-medial',    5,       'Osteoarthritis',  'Medial',     '6891b_med_oa.imzML',
+  '6908-OA-lateral',   6,       'Osteoarthritis',  'Lateral',    '6908a_lat_oa.imzML',
+  '6908-OA-medial',    6,       'Osteoarthritis',  'Medial',     '6908b_med_oa.imzML',
+  '6949-OA-lateral',   7,       'Osteoarthritis',  'Lateral',    '6949a_lat_oa.imzML',
+  '6949-OA-medial',    7,       'Osteoarthritis',  'Medial',     '6949a_med_oa.imzML',
+  '6954-OA-lateral',   8,       'Osteoarthritis',  'Lateral',    '6954a_lat_oa.imzML',
+  '6954-OA-medial',    8,       'Osteoarthritis',  'Medial',     '6954b_med_oa.imzML'
 ) %>%
   mutate(tid = stringr::str_extract(run, "\\d{4}") %>% 
            paste0(ifelse(grepl("-CAD-", run), "-C", "-O"), 
@@ -71,6 +71,30 @@ manage_directory <- function(path) {
   } else {
     dir.create(path, recursive = TRUE)
   }
+}
+
+image_png <- function(object, ..., filename = "image.png",
+          width = 1000, height = 800, pointsize = 24,
+          res = NA, units = "px", bg = "white") {
+  # Create output directory if needed
+  dir_path <- dirname(filename)
+  if (dir_path != "." && !dir.exists(dir_path)) {
+    dir.create(dir_path, recursive = TRUE)
+  }
+
+  # Open device
+  if (is.na(res)) {
+    png(filename = filename, width = width, height = height,
+      pointsize = pointsize, units = units, bg = bg)
+  } else {
+    png(filename = filename, width = width, height = height,
+      pointsize = pointsize, res = res, units = units, bg = bg)
+  }
+  on.exit(dev.off(), add = TRUE)
+
+  p <- Cardinal::image(object, ...)
+  print(p)
+  invisible(p)
 }
 
 #### MSE write functions ####
@@ -118,6 +142,53 @@ write_MSI_list <- function(mse_list, root) {
     )
   }
 }
+
+writeMSIDataSafe <- function(mse_data, filepath, ...) {
+  # Extract directory from filepath
+  dir_path <- dirname(filepath)
+  
+  # Only create directory if it's not the current directory
+  # (dirname returns "." for filenames without path)
+  if (dir_path != ".") {
+    if (!dir.exists(dir_path)) {
+      dir.create(dir_path, recursive = TRUE)
+    }
+  }
+  
+  # Write the data
+  writeMSIData(mse_data, filepath, ...)
+}
+
+#### MSE Filtering Functions ####
+
+filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
+                                   run_col = "run",
+                                   spectra_name = "intensity"){
+  pd <- pixelData(mse)
+  run <- pd[[run_col]]
+  if (is.null(run)) stop("pixelData(mse)$", run_col, " is NULL")
+  run <- as.factor(run)
+
+  X <- spectra(mse, spectra_name)
+
+  keep <- rep_len(TRUE, nrow(mse))
+
+  for (lv in levels(run)) {
+    cols <- which(run == lv)
+    if (length(cols) == 0L) next
+
+    Xr <- X[, cols, drop = FALSE]
+
+    # present iff finite AND non-zero
+    present_counts <- rowSums(is.finite(Xr) & (Xr != 0))
+
+    freq <- present_counts / length(cols)
+    keep <- keep & (freq >= cutoff)
+  }
+
+  mse[keep, , drop = FALSE]
+}
+
 
 #### Clustering functions ####
 

@@ -1,5 +1,7 @@
 ---
 title: "1-Preprocessing"
+author: "Ethan Rogers"
+date: "03/20/2026"
 output:
   html_document: default
 ---
@@ -20,47 +22,42 @@ local({
 
 ```
 
-Preprocessing has many functions but overarching goals include reducing nuisance variation, increasing variation of interest (signal) and enabling comparison between samples. The choices made during preprocessing can significantly impact the results of downstream analyses. Important steps include loading data, including peak picking, region of interest (ROI) segmentation, and normalization.
+Preprocessing has many functions, but the overarching goals include reducing nuisance variation, increasing variation of interest (signal), and enabling comparisons between samples. The choices made during preprocessing can significantly impact the results of downstream analyses. Important steps include loading data, peak recalibration, peak picking, peak alignment, region of interest (ROI) selection, and normalization.
 
-# Load Data
-
-# Peak picking
-
-# ROI Segmentation
-
-## Load required packages
-
-```{r library, results='hide', warning=FALSE, message=FALSE}
-library(tidyverse)
+# Load dependencies
+```{r load-dependencies, results='hide', warning=FALSE, message=FALSE}
+library(dplyr)
+library(tibble)
 library(Cardinal)
-source("Utilities.R")
+
+source(file.path("Utilities.R"))
+
+RNGkind("L'Ecuyer-CMRG")
+
+setCardinalVerbose(verbose = FALSE)
+gcinfo(verbose = FALSE)
 ```
 
-## Find peak-picked imzML files
+# Data availability
+This dataset is available on MassIVE under ID [MSV000094448](https://doi.org/doi:10.25345/C5HQ3S91K) as the original dataset from [Schurman et al., 2025](https://doi.org/10.1038/s41413-025-00495-0). This work is presented as a reanalysis. Running this workflow starting with the raw files will produce each intermediate. Alternatively, each dataset and all intermediates can be downloaded and placed in the `./Data` directory.
 
-```{r find_imzML}
-DATA_PATH <- file.path("Data/Peakpicked")
+# Load data
+We will load individual images from `./Data/Raw`. Some images need to be flipped (to position cartilage on top, as it would be anatomically). Two images have zones of zero pixel intensity and must be trimmed. Sometimes images have coordinate dimensions that are redundant, such as the `z` coordinate where all values are 1 for a 2D image. Leaving these coordinates in can cause issues with Cardinal, so we will set them to `NULL`.
+
+```{r load-raw-data}
+DATA_PATH <- file.path("Data", "Raw")
 MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
                             recursive = TRUE)
-```
 
-## Load peak-picked imzML files
-
-We will keep them in a named list for now. Two images have areas of zero intensity, so they are trimmed. As these images are of tibial plateaus, we will flip some images so that the cartilage is always on top.
-
-```{r load_imzML}
-mse_list_pp = list()
+mse_list_raw = list()
 for (f in MSE_FILENAMES) {
   just_fname <- isolate_filename(f)
-  agnostic_step_fname <- sub("^(\\d+)[ab](-[^-]*-[^-]*)-.*$", "\\1\\2", just_fname)
+  agnostic_step_fname <- name_tibble |> 
+    filter(raw_filename == f) |> 
+    pull(run)
+  if (length(agnostic_step_fname) != 0){
+
   m <- readMSIData(file.path(DATA_PATH, f),verbose=F) 
-  
-  if (agnostic_step_fname == "6919-CAD-medial") {
-    m <- Cardinal::subset(m, mz > 0, x <= 390)
-  }
-  if (agnostic_step_fname == "6924-CAD-medial") {
-    m <- Cardinal::subset(m, mz > 0, x <= 367)
-  }
   
   if (agnostic_step_fname %in% c("6891-OA-lateral",
                         "6891-OA-medial",
@@ -70,39 +67,361 @@ for (f in MSE_FILENAMES) {
                         "6954-OA-medial")) {
     m <- flip_vertically(m)
   }
+
+  if (agnostic_step_fname == "6919-CAD-medial") {
+    m <- Cardinal::subset(m, x <= 390)
+  }
+  if (agnostic_step_fname == "6924-CAD-medial") {
+    m <- Cardinal::subset(m, x <= 367)
+  }
+
+  #best not to have extraneous or unused coordinates
+  coord(m)$z <- NULL
+
   runNames(m) <- agnostic_step_fname
-  mse_list_pp[[agnostic_step_fname]] <- m
+  mse_list_raw[[agnostic_step_fname]] <- m
+  } else {
+    print(paste("Skipping ",f))
+  }
 }
 ```
 
-## Segmentation of ROIs
+This code will recreate figures from the manuscript.
+```{r fig-peakpicking-a, results='hide', warning=FALSE, message=FALSE, echo=TRUE}
+png(filename = file.path("Recreated-Figures", 
+                         "Figure-Peakpicking-Raw.png"), 
+    height = 500, width = 1000, pointsize = 20)
 
-ROIs define the tissue areas relevant to the biological question to be analyzed in later steps. Below we present a method that uses predefined marker ions to segment regions of interest. We will use this method to segment cartilage, bone, and background/extracellular matrix (ECM). It is important involve subject matter experts (i.e., pathologists, biologists who know the tissue) in selection of ROI markers and review of segmentation results. Unsupervised multivariate segmentation methods that use all features, although useful for discovery, should not be used to create ROIs when investigating differential abundance as doing go constitutes double dipping and overfits ROIs to biological variation.
+m <- mse_list_raw[[1]] |> 
+  convertMSImagingArrays2Experiment() |>
+  summarizeFeatures(stat = c("mean", "sd"), verbose = F, 
+    BPPARAM = SnowfastParam(workers = 10L, force.GC = T))
+
+print(plot(m, "mean", 
+     ylab = "Mean Pixel Intensity", 
+     #xlim = c(850, 2500), 
+     #ylim = c(0, 850),
+     grid = F))
+
+dev.off()
+
+as_tibble(fData(m)) |> 
+  filter(mean != 0 | sd != 0) |>
+  mutate(cv = sd/mean) |>
+  summarise(mean_cv = mean(cv, na.rm = T))
+```
+
+# A note about parallel preprocessing
+MSI data are large and can be time and resource intensive to preprocess. In these vignettes we employ heavy use of parallel processing via Cardinal, which itself uses [BiocParallel](https://www.bioconductor.org/packages//release/bioc/vignettes/BiocParallel/inst/doc/Introduction_To_BiocParallel.html).
+Powerful computers, especially computers with lots of memory, will benefit most from parallel processing. We will use matter's `SnowfastParam` as it is compatible with all major platforms and interactive usage (unlike `MulticoreParam`) but is faster than `SnowParam`. Performance depends on many factors, so parameters must ultimately be tuned to the specific computer, dataset, and processing step. Select parameters carefully. Keyboard interrupts may fail to terminate commands that have launched multiple parallel processes and may require manually killing those processes. Additionally, if overly ambitious parameter choices demand more physical memory than the system can provide, the operating system will begin using swap space. This shifts processing effort toward memory management and can severely degrade performance. In extreme cases, the system may become unresponsive while attempting to manage memory during preprocessing, and the command may eventually terminate or the system may crash.
+
+More information detailing how to set parallel defaults and options in Cardinal can be found in the *Cardinal-package* section of the [Cardinal reference manual](https://bioconductor.org/packages/release/bioc/manuals/Cardinal/man/Cardinal.pdf).
+
+# A note about out-of-memory objects and memory management in Cardinal
+Computer memory, more than speed, is the limiting factor for working with MSI datasets. Cardinal v3 addresses these issues using the matter package as its backend. In general, when loading .imzML files, Cardinal leaves memory-heavy components (for example, intensity matrices) out-of-memory, instead using a `matter_mat` to provide an "interface" for the data. When data is read, such as during a preprocessing step, the matter matrix streams the data from disk as it is needed. This lets us interact with data that would be too large to hold in memory at once. This process will be slower for certain operations, and for computers without solid-state drives. Out-of-memory objects have some limitations. Results of operations, such as recalibration, are by default NOT stored as out-of-memory objects. Consider the following code:
+
+```
+mse_recalibrated <- recalibrate(mse, 
+  ref = reference_peaks, tolerance = tol, units = "ppm")
+```
+
+Before recalibration, `mse` holds metadata in memory and its intensity matrix out-of-memory. After recalibration, `mse` holds metadata AND the recalibrated intensity matrix (the result of the recalibration step) IN memory. We will address this by writing the results of each intermediate to disk as .imzML files, garbage collecting the object, and reloading the results via `readMSIData`; leaving us with results as out-of-memory objects. To check an object's memory usage, include in-memory and out-of-memory usage, one can use `matter::mem(object)`. See `?matter::mem` for additional details.
+
+# Peak picking
+
+Peak picking is the process of selecting informative peaks for later analysis. For multi-sample experiments, peak picking must yield feature sets with a shared mass spectrum. We will begin with smoothing and baseline reduction. Not all datasets require these steps. Smoothing can help denoise outlier pixels. Baseline reduction corrects baseline increases that often happen at small mass ranges.
+
+We will perform smoothing and baseline recalibration individually on each sample, using parallel processing to speed up processing on each sample.
+```{r peak-picking-params, warning=FALSE, message=FALSE, }
+calibrant_mz <- sort(c(1570.6896, 843.39, 1019.50, 1211.58, 1552, 2097))
+invisible(gc())
+for (n in names(mse_list_raw)) {
+  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," BLR + SMOOTH\n")
+  m <- mse_list_raw[[n]]|> 
+                smooth(method = "gaussian", width = 8, sd = 2) |>
+                reduceBaseline(method = "median") |>
+                process(BPPARAM=SnowfastParam(workers = 10, force.GC = T))
+  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," WRITE\n")  
+  writeMSIDataSafe(m,
+              file.path("Data",
+                        "Preprocessing",
+                        "Smoothed-BLR", 
+                        paste0(runNames(m), ".imzML")),
+              BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
+  rm(m)
+  invisible(gc())
+}
+```
+
+Reload smoothed and baseline-reduced intermediates so they are out of memory.
+
+```{r}
+DATA_PATH <- file.path("Data","Preprocessing","Smoothed-BLR")
+MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
+                            recursive = TRUE)
+
+mse_list_smooth = list()
+for (f in MSE_FILENAMES) {
+  m <- readMSIData(file.path(DATA_PATH, f),verbose=F) 
+  mse_list_smooth[[runNames(m)]] <- m
+}
+```
+
+Peak recalibration aligns spectra to a shared reference. We will perform this step twice - the first time with a set of estimated, sample-specific reference peaks, and the second time with a set of predefined reference peaks shared across all samples. The intention is for the first recalibration to align spectra within a sample, and the second for aligning samples to each other.
+
+Recalibration is the most computational and memory intensive step in preprocessing. It may take a long time, and may consume all of your device's memory. Adjust parallel processing parameters as necessary. 
+
+```{r}
+for (n in names(mse_list_smooth)){
+  m <- mse_list_smooth[[n]]
+  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," ESTREFPEAKS\n")
+  esti_ref_peaks <- estimateReferencePeaks(m, 
+    BPPARAM = SnowfastParam(workers = 10L, force.GC = T))
+
+  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," RECALIBx2\n")
+  m_recalib_picked <- m |> 
+              recalibrate(ref = esti_ref_peaks, tolerance = 80, units = "ppm") |> 
+              recalibrate(ref = calibrant_mz, tolerance = 80, units = "ppm") |>
+              process(BPPARAM=SnowfastParam(workers = 15L, force.GC = T))
+  invisible(gc())
+
+  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," WRITE\n")
+  writeMSIDataSafe(m_recalib_picked,
+              file.path("Data",
+                        "Preprocessing",
+                        "Smoothed-BLR-Recalibrated", 
+                        paste0(runNames(m_recalib_picked), ".imzML")),
+              BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
+  rm(m_recalib_picked)
+  invisible(gc())
+}
+
+rm(mse_list_smooth)
+invisible(gc())
+```
+
+As before, reload intermediates to be out of memory. 
+
+```{r read-recalibrated}
+DATA_PATH_PICKED <- file.path("Data","Preprocessing",
+  "Smoothed-BLR-Recalibrated")
+MSE_FILENAMES_PICKED <- list.files(DATA_PATH_PICKED, pattern = "\\.imzML$",
+                            recursive = TRUE)
+
+mse_list_rp = list()
+for (f in MSE_FILENAMES_PICKED) {
+  m <- readMSIData(file.path(DATA_PATH_PICKED, f), verbose=F) 
+  mse_list_rp[[runNames(m)]] <- m
+}
+```
+
+Next, let us assign metadata to each pixel. This will assist later with modeling and tissue identification. This notation, i.e. `MSimage$var_name <- value`, assigns `value` as a column in the `MSimage` `PositionDataFrame` object. `value` must be of length 1 (to assign the same value to every pixel) or length n_pixels (to assign a specific value to each pixel).
+
+```{r}
+for (n in names(mse_list_rp)) {
+  sample_info <- name_tibble |> filter(run == n)
+  mse_list_rp[[n]]$subject <-  sample_info$subject
+  mse_list_rp[[n]]$condition <- sample_info$condition
+  mse_list_rp[[n]]$tissue <- sample_info$tissue
+}
+```
+
+This chain conducts multiple steps, yielding a single `MSImagingExperiment` object containing a run for every sample, all with a shared mass axis.
+
+- `combine` groups samples into a single `MSImagingArrays` object.
+- `peakPick` performs peak picking on all spectra with the same method and signal-to-noise ratio (SNR) across all samples
+- `peakAlign` centroids the picked peaks, creating the unified mass axis for all samples. This also converts the `MSImagingArrays` to a `MSImagingExperiment`
+- `process` actually executes the above steps.
+- `summarizeFeatures` summarizes pixel intensities by features. Keep in mind that these summaries are across all values from every sample - now represented as runs in the `MSImagingExperiment` object
+
+The final step, changing the `spectrumRepresentation`, ensures that Cardinal writes the object to disk as centroided. (This is not always necessary and is done to ensure backwards compatibility with previous versions of Cardinal v3.)
+
+After these steps, the resulting combined image will have an orders-of-magnitude smaller memory footprint, as we are no longer maintaining separate mass axes for each spectrum and non-centroided peaks. The object should easily fit in memory.
+
+```{r}
+mse_all <- combine(mse_list_rp) |>
+            peakPick(method="diff", SNR=5) |>
+            peakAlign(tolerance = 80, units = "ppm") |>
+            process(BPPARAM=SnowfastParam(workers = 10L, force.GC = T)) |> 
+            summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"),
+              na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
+
+rm(mse_list_rp)
+invisible(gc())
+
+# This is likely unnecessary, but may prevent 
+# issues with older versions of Cardinal
+experimentData(mse_all)$spectrumRepresentation <- "centroid spectrum"
+```
+
+Cardinal automatically calculates `freq` during peak picking, but this metric is computed across all runs. In our workflow, we recommend filtering peaks by non-zero frequency on a per-run basis. The function below can do this.
+
+```{r}
+filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
+                                   run_col = "run",
+                                   spectra_name = "intensity"){
+  pd <- pixelData(mse)
+  run <- pd[[run_col]]
+  if (is.null(run)) stop("pixelData(mse)$", run_col, " is NULL")
+  run <- as.factor(run)
+
+  X <- spectra(mse, spectra_name)
+
+  keep <- rep_len(TRUE, nrow(mse))
+
+  for (lv in levels(run)) {
+    cols <- which(run == lv)
+    if (length(cols) == 0L) next
+
+    Xr <- X[, cols, drop = FALSE]
+
+    # present iff finite AND non-zero
+    present_counts <- rowSums(is.finite(Xr) & (Xr != 0))
+
+    freq <- present_counts / length(cols)
+    keep <- keep & (freq >= cutoff)
+  }
+
+  mse[keep, , drop = FALSE]
+}
+```
+
+Using the function defined above, filter peaks so that only peaks where `freq >= 0.05` in every run are retained.
+
+```{r combine-align}
+mse_all_filt <- mse_all |> 
+  filterFeaturesByRunFreq(0.05) |> 
+  summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
+    na.rm = T,  BPPARAM=SnowfastParam(workers = 5L))
+invisible(gc())
+```
+
+Write the uniform, peak-picked image to disk.
+
+```{r write-combined}
+writeMSIDataSafe(mse_all_filt,
+  file.path("Data", 
+    "Preprocessing", 
+    "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
+```
+
+For other steps, it is useful to have each peak-picked image separate again.
+
+```{r write-individual-filtered}
+for (rn in runNames(mse_all_filt)) {
+  m <- subsetPixels(mse_all_filt, run == rn)
+  writeMSIDataSafe(m,
+              file.path("Data", 
+                "Preprocessing", 
+                "Individual-Picked-Aligned-Filtered", 
+                paste0(rn, ".imzML")))
+}
+```
+
+Remove unnecessary objects from memory.
+
+```{r plot-mean-and-cleanup}
+#CLEAN UP
+rm(m, mse_all_filt, mse_all)
+invisible(gc())
+```
+
+
+# ROI Segmentation
+
+ROIs define the tissue areas relevant to the biological question to be analyzed in later steps. Region of interest (ROI) segmentation can be achieved through many means. Below we present a method that uses predefined marker ions to segment regions of interest. We will use this method to segment cartilage, bone, and background/extracellular matrix (ECM). It is important to involve subject matter experts (i.e., pathologists and biologists who know the tissue) in selection of ROI markers and review of segmentation results. Unsupervised multivariate segmentation methods that use all features, although useful for discovery, should not be used to create ROIs when investigating differential abundance, as doing so constitutes double dipping and overfits ROIs to biological variation.
+
+## Load required packages
+
+```{r library, results='hide', warning=FALSE, message=FALSE}
+library(dplyr)
+library(ggplot2)
+library(data.table)
+library(tibble)
+library(Cardinal)
+
+source(file.path("Utilities.R"))
+
+RNGkind("L'Ecuyer-CMRG")
+
+
+setCardinalVerbose(verbose = FALSE)
+
+# Patch for domain-filtered sparse_mat coercion bug
+setMethod("as.vector", "sparse_arr",
+  function(x, mode = "any") {
+    if ( mode != "any" )
+      matter::type(x) <- mode
+    y <- as.vector(x[])
+    names(y) <- NULL
+    y
+  })
+```
+
+## Find peak-picked imzML files
+
+```{r find_imzML}
+DATA_PATH <- file.path("Data", 
+                        "Preprocessing", 
+                        "Individual-Picked-Aligned-Filtered")
+MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
+                            recursive = TRUE)
+```
+
+## Load peak-picked imzML files
+
+We will keep them in a named list for now.
+
+```{r load_imzML}
+mse_list_pp = list()
+for (f in MSE_FILENAMES) {
+  sample_name <- sub('\\..*$', '', basename(f))
+  m <- readMSIData(file.path(DATA_PATH, f),verbose=F) 
+  runNames(m) <- sample_name
+  mse_list_pp[[sample_name]] <- m
+}
+```
+
 
 ### Visualize segmentation markers
 
+First, let's subset a representative image. We will locate the features with m/z values nearest our approximate values for the representative features.
+
 ```{r roi_setup}
-cartilage_feature_ids <- 37
-background_feature_ids <- c(286,287,288,299,300,301,308)
-m <- summarizeFeatures(flip_vertically(readMSIData(file.path(DATA_PATH, MSE_FILENAMES[9]),
-                                                   verbose=F)), 
+m <- readMSIData(file.path(DATA_PATH, MSE_FILENAMES[1]), verbose=F)
+
+cartilage_feature_approx <- 1141.5556
+cartilage_feature_ids <- features(m, mz = cartilage_feature_approx)
+
+background_feature_approx <- c(1570.6786, 
+                                1571.6801, 
+                                1572.6808, 
+                                1592.6699, 
+                                1593.6739, 
+                                1594.6766, 
+                                1608.6582)
+background_feature_ids <- features(m, mz = background_feature_approx)
+
+m <- summarizeFeatures(m, 
                        na.rm = T, 
-                       verbose = F)
+                       verbose = F,
+                       BPPARAM = SnowfastParam(workers = 5L, 
+                          force.GC = T))
 ```
 
-We chose m/z `r mz(m)[cartilage_feature_ids]` as the cartilage marker, as it accurately defines cartilage across the greatest number of tissues. Below is a single tissue.
+We chose m/z `r round(mz(m)[cartilage_feature_ids],3)` as the cartilage marker, as it accurately defines cartilage across the greatest number of tissues. Below is a single tissue.
 
 ```{r roi_vis_cartilage}
 image(m, i = cartilage_feature_ids, key = F)
 ```
 
-There were seven m/z values indicative of background/ECM m/z: `r mz(m)[background_feature_ids]`
+There were seven m/z values indicative of background/ECM: `r round(mz(m)[background_feature_ids],3)`
 
--   M/z `r mz(m)[background_feature_ids[1:3]]` are Glufib and +1, +2, and +3 isotopes/H adducts.
+-   M/z `r round(mz(m)[background_feature_ids[1:3]],3)` are Glufib, +1, and +2 isotopes.
 
--   M/z `r mz(m)[background_feature_ids[4:6]]` are *potentially* Glufib +23 sodium adducts and +1 and +2 isotopes/H adducts.
+-   M/z `r round(mz(m)[background_feature_ids[4:6]],3)` are *potentially* Glufib +23 sodium adducts and +1 and +2 isotopes.
 
--   M/z `r mz(m)[background_feature_ids[7]]` is not a highly consistent spatial analog, similar enough to include in ROI segmentation.
+-   M/z `r round(mz(m)[background_feature_ids[7]],3)` is an identical spatial analog, similar enough to include in ROI segmentation.
 
 ```{r roi_vis_background}
 image(m, i = background_feature_ids,
@@ -115,39 +434,38 @@ image(m, i = background_feature_ids,
 To begin we will select only the single cartilage marker as its own MSE.
 
 ```{r subset_cartilage_features}
-cartilage_features <- subsetFeatures(m,
-                                     mz %in% mz(m)[cartilage_feature_ids])
+cartilage_features <- m[cartilage_feature_ids,]
 ```
 
 Spatial-Dirichlet Gaussian mixture models (sDGMM) [(Guo et al. 2019)](https://doi.org/10.1093/bioinformatics/btz345) is an open-source, unsupervised clustering algorithm that groups pixels in single ion images into $k$ prespecified clusters using pixel intensity and spatial dependence of neighboring pixels. sDGMM is technically unsupervised but acts only on single features, facilitating a higher degree of control and replicability. We will use adaptive weights to better define segment edges.
 
-Choosing the number of clusters is one way to affect a finer level of control over what sDGMM segments. In our testing we found six clusters, ordered by mean intensity with the first three assigned as cartilage, to yield the most consistent results across samples.
+Choosing the number of clusters is one way to affect a finer level of control over what sDGMM segments. In our testing we found 5 clusters, ordered by mean intensity with the first three assigned as cartilage, to yield the most consistent results across samples.
 
 ```{r segment_cartilage_features}
+set.seed(12345)
 sdgmm <- spatialDGMM(cartilage_features, 
-                       k = 6, 
-                       r = 2,
+                       k = 5, 
+                       r = 5,
                        weights = "adaptive",
                        verbose = F)
 
-cartilage_vector <- case_match(as.character(sdgmm$class[[1]]), 
-                               "6" ~ "other",
+cartilage_vector <- recode_values(as.character(sdgmm$class[[1]]),
                                "5" ~ "other", 
                                "4" ~ "other",
-                               "3" ~ "cartilage", 
+                               "3" ~ "other", 
                                "2" ~ "cartilage", 
                                "1" ~ "cartilage")
 
 pData(cartilage_features)$class <- cartilage_vector
 ```
 
-Visualizing the six clusters, we can see that in this case segmenting more clusters gave finer control over cartilage boundaries.
+Visualizing the 5 clusters, we can see that in this case segmenting more clusters gave finer control over cartilage boundaries.
 
 ```{r vis_cartilage_sdgmm}
 image(sdgmm)
 ```
 
-After collapsing the six segments into only two.
+After collapsing the 5 segments into only two.
 
 ```{r vis_cartilage_class}
 image(cartilage_features, "class")
@@ -165,7 +483,7 @@ background_and_bone_features <- Cardinal::subset(m,
                                                  cartilage_vector=="other")
 ```
 
-Unlike cartilage, we have selected six features for background/ECM segmentation. Instead of segmentation each individually, we will first combine them into a single feature by using the pixel-wise mean. `condense_groups` (supplied from `Utilities.R`) uses the `group_ids` assigned by `grouping_df` to combine features into groups. The `agg_fun="mean"` specifies we want to combine groups via the pixel-wise mean.
+Unlike cartilage, we have selected six features for background/ECM segmentation. Instead of segmenting each individually, we will first combine them into a single feature by using the pixel-wise mean. `condense_groups` (supplied from `Utilities.R`) uses the `group_ids` assigned by `grouping_df` to combine features into groups. The `agg_fun="mean"` specifies we want to combine groups via the pixel-wise mean.
 
 ```{r combine_background_features}
 grouping_df <- tibble(feature_id = 1:length(mz(background_and_bone_features)),
@@ -188,13 +506,14 @@ image(background_and_bone_features_condensed, key = F)
 Next we will segment the background/ECM feature aggregate using sDGMM. Like before, varying the number of clusters affects the segmentation results, especially at the segment boundaries.
 
 ```{r segment_background}
+set.seed(12345)
 sdgmm <- spatialDGMM(background_and_bone_features_condensed, 
                      k = 4, 
                      r = 1,
                      weights = "adaptive",
                      verbose = F)
 
-bone_background_vector <- case_match(as.character(sdgmm$class[[1]]), 
+bone_background_vector <- recode_values(as.character(sdgmm$class[[1]]), 
                                      "4" ~ "bone",
                                      "3" ~ "background", 
                                      "2" ~ "background", 
@@ -219,11 +538,11 @@ There are likely more underlying structures, especially in the bone ROI, that co
 ```{r combine_labels}
 factor_tibble <- tibble(x = pData(cartilage_features)$x,
                         y = pData(cartilage_features)$y,
-                        cartilage = cartilage_vector) %>% 
+                        cartilage = cartilage_vector) |> 
   left_join(tibble(x = pData(background_and_bone_features)$x,
                    y = pData(background_and_bone_features)$y,
                    bone_background = bone_background_vector), 
-            by = c("x","y")) %>%
+            by = c("x","y")) |>
   mutate(zone = as.factor(ifelse(is.na(bone_background),
                                  "cartilage", 
                                  bone_background)))
@@ -239,79 +558,220 @@ image(m, "tissue_zone")
 
 ## Segment all samples
 
-Now we will repeat this procedure on all samples, saving the ROI labels in a names list and a dataframe for visualization.
+Now we will repeat this procedure on all samples, saving the ROI labels in a named list and a data frame for visualization.
 
-```{r segment_all_tissues}
-hc_class_plotting_frame = NULL
-roi_list = list()
-i <- 1
-for (m in names(mse_list_pp)) {
-  print(paste0("Segmenting sample ", i))
-  i <- i+1
-  cartilage_features <- subsetFeatures(mse_list_pp[[m]], 
-                                       mz %in% fData(mse_list_pp[[m]])[cartilage_feature_ids,])
-  
-  sdgmm <- spatialDGMM(cartilage_features, 
-                       k = 6, 
-                       r = 2,
-                       weights = "adaptive",
-                       verbose = F)
-  
-  cartilage_vector <- case_match(as.character(sdgmm$class[[1]]), 
-                                 "6" ~ "other",
-                                 "5" ~ "other", 
-                                 "4" ~ "other",
-                                 "3" ~ "cartilage", 
-                                 "2" ~ "cartilage", 
-                                 "1" ~ "cartilage")
-  
-  background_and_bone_features <- Cardinal::subset(mse_list_pp[[m]], 
-                                                   mz %in% fData(mse_list_pp[[m]])[background_feature_ids,],
-                                                   cartilage_vector=="other")
-  grouping_df <- tibble(feature_id = 1:length(mz(background_and_bone_features)),
-                        group_id = rep(1, length(mz(background_and_bone_features))),
-                        mz = mz(background_and_bone_features))
-  background_and_bone_features_condensed <- condense_groups(background_and_bone_features, 
-                                                            grouping_df, 
-                                                            verbose = FALSE, 
-                                                            agg_fun="mean", 
-                                                            na.rm=T)
-  sdgmm <- spatialDGMM(background_and_bone_features_condensed, 
-                       k = 4, 
-                       r = 1,
-                       weights = "adaptive",
-                       verbose = F)
-  bone_background_vector <- case_match(as.character(sdgmm$class[[1]]), 
-                                       "4" ~ "bone",
-                                       "3" ~ "background", 
-                                       "2" ~ "background", 
-                                       "1" ~ "background")
-  factor_tibble <- tibble(x = pData(cartilage_features)$x,
-                          y = pData(cartilage_features)$y,
-                          cartilage = cartilage_vector) %>% 
-    left_join(tibble(x = pData(background_and_bone_features)$x,
-                     y = pData(background_and_bone_features)$y,
-                     bone_background = bone_background_vector), 
-              by = c("x","y")) %>%
-    mutate(zone = as.factor(ifelse(is.na(bone_background),
-                                   "cartilage", 
-                                   bone_background)))
-  pData(mse_list_pp[[m]])$tissue_zone <- factor_tibble$zone
-  roi_list[[m]] <- factor_tibble$zone
-  hc_class_plotting_frame <- bind_rows(hc_class_plotting_frame,
-                                       as_tibble(pData(mse_list_pp[[m]])) %>%
-                                         mutate(id = m))
+```{r}
+bp <- SnowfastParam(workers = 15L, force.GC = TRUE)
+
+mse_list_segmented <- BiocParallel::bplapply(
+  mse_list_pp,
+  function(mse) {
+
+    source(file.path("Utilities.R"))
+
+    # bug in matter - needs to be here for now
+    setMethod("as.vector", "sparse_arr",
+      function(x, mode = "any") {
+        if ( mode != "any" )
+        matter::type(x) <- mode
+        y <- as.vector(x[])
+        names(y) <- NULL
+        y
+      })
+
+    cartilage_feature_approx <- 1141.5556
+    cartilage_feature_ids <- features(mse, 
+      mz = cartilage_feature_approx)
+
+    background_feature_approx <- c(1570.6786, 
+                                1571.6801, 
+                                1572.6808, 
+                                1592.6699, 
+                                1593.6739, 
+                                1594.6766, 
+                                1608.6582)
+    background_feature_ids <- features(mse, 
+      mz = background_feature_approx)
+
+    ## --- cartilage vs other ---
+    cartilage_features <- mse[cartilage_feature_ids, ]
+
+    set.seed(12345)
+    sdgmm1 <- spatialDGMM(
+          cartilage_features,
+          k = 5,
+          r = 5,
+          weights = "adaptive",
+          verbose = F
+        )
+
+      cartilage_vector <- recode_values(
+        as.character(sdgmm1$class[[1]]),
+        "5" ~ "other",
+        "4" ~ "other",
+        "3" ~ "other",
+        "2" ~ "cartilage",
+        "1" ~ "cartilage"
+      )
+
+    background_and_bone_features <- Cardinal::subset(
+      mse,
+      background_feature_ids,
+      cartilage_vector == "other"
+    )
+
+    grouping_df <- tibble(
+      feature_id = seq_along(mz(background_and_bone_features)),
+      group_id   = 1L,
+      mz         = mz(background_and_bone_features)
+    )
+
+    background_and_bone_features_condensed <- condense_groups(
+      background_and_bone_features,
+      grouping_df,
+      verbose = FALSE,
+      agg_fun = "mean",
+      na.rm = TRUE
+    )
+
+    set.seed(12345)
+    sdgmm2 <- spatialDGMM(
+      background_and_bone_features_condensed,
+      k = 4,
+      r = 1,
+      weights = "adaptive",
+      verbose = FALSE
+    )
+
+    bone_background_vector <- recode_values(
+      as.character(sdgmm2$class[[1]]),
+      "4" ~ "bone",
+      "3" ~ "background",
+      "2" ~ "background",
+      "1" ~ "background"
+    )
+
+    ## --- assemble zones ---
+    factor_tibble <- tibble(
+      x = pData(cartilage_features)$x,
+      y = pData(cartilage_features)$y,
+      cartilage = cartilage_vector
+    ) |>
+      left_join(
+        tibble(
+          x = pData(background_and_bone_features)$x,
+          y = pData(background_and_bone_features)$y,
+          bone_background = bone_background_vector
+        ),
+        by = c("x", "y")
+      ) |>
+      mutate(
+        zone = factor(ifelse(is.na(bone_background),
+                             "cartilage",
+                             bone_background))
+      )
+
+    pData(mse)$tissue_zone <- factor_tibble$zone
+
+    mse
+  },
+  BPPARAM = bp
+)
+
+pdata_list <- lapply(names(mse_list_segmented), function(nm) {
+  dt <- as.data.table(pData(mse_list_segmented[[nm]]))
+  dt[, id := nm]
+  dt
+})
+
+hc_class_plotting_frame <- rbindlist(pdata_list)
+roi_list <- hc_class_plotting_frame[, .(x, y, run, tissue_zone)]
+
+save(roi_list, file = file.path("Outputs", "roi_list.Rdata"))
+```
+
+## Benchmark: segmentation with spatial shrunken centroids
+
+To illustrate the effect of segmentation method on P values, we will compare the single ion segmentation of the OA dataset to segmentation results from multivariate segmentation methods, specifically spatial shrunken centroids. Multiple values of `k` and `s` were tested. Segmentation did not meaningfully improve past `k=5` and there were minimal differences between different values of `s`, thus it was kept to `s = 0` (the default). Even still, several tissues demonstrated poor segmentation of cartilage. Additionally, as multivariate segmentation begins with random class allocation, it will not produce the same class labels for each tissue. Therefore, the author has annotated them, include situation when multiple classes must be combined into one to form cartilage. We will use these results at the end of the vignette to evaluate at sensitivity of T tests between conditions when performed on ROIs segmented with differernt methods. .
+```{r}
+bp <- SnowfastParam(workers = 16L, force.GC = TRUE)
+
+sscs <- BiocParallel::bplapply(
+  mse_list_pp,
+  function(mse) {
+    set.seed(54321)
+    # bug in matter - needs to be here for now
+    setMethod("as.vector", "sparse_arr",
+      function(x, mode = "any") {
+        if ( mode != "any" )
+        matter::type(x) <- mode
+        y <- as.vector(x[])
+        names(y) <- NULL
+        y
+      })
+
+    ssc <- spatialShrunkenCentroids(mse, k = 5, weights = "adaptive")
+    ssc
+  },
+  BPPARAM = bp
+)
+
+manage_directory("sscs")
+
+for (ssc in names(sscs)) {
+  image_png(sscs[[ssc]], "class", filename = file.path("sscs", paste0("ssc_",ssc,".png")))
 }
 
-save(roi_list, file = "Outputs/roi_list.Rdata")
+
+
+mvs_cartilage_class <- list("6891-OA-lateral" = c(3), 
+                        "6891-OA-medial" = c(4),
+                        "6908-OA-lateral" = c(3),
+                        "6908-OA-medial" = c(5),
+                        "6919-CAD-lateral" = c(5), 
+                        "6919-CAD-medial" = c(3),
+                        "6924-CAD-lateral" = c(3,5),
+                        "6924-CAD-medial" = c(4),
+                        "6938-CAD-lateral" = c(1),
+                        "6938-CAD-medial" = c(3),
+                        "6944-CAD-lateral" = c(2),
+                        "6944-CAD-medial" = c(1),
+                        "6949-OA-lateral" = c(2),
+                        "6949-OA-medial" = c(4),
+                        "6954-OA-lateral" = c(3),
+                        "6954-OA-medial" = c(3))
+
+pdata_list_mvs <- lapply(names(mse_list_pp), function(nm) {
+  class_vec <- sscs[[nm]]$class
+  mse_list_pp[[nm]]$tissue_zone_mvs <- ifelse( class_vec %in% mvs_cartilage_class[[nm]] ,"cartilage","other")
+  dt <- as.data.table(pData(mse_list_pp[[nm]]))
+  dt[, id := nm]
+  dt
+})
+
+hc_class_plotting_frame_mvs <- rbindlist(pdata_list_mvs)
+roi_list_mvs <- hc_class_plotting_frame_mvs[, .(x, y, run, tissue_zone_mvs)]
+
+save(roi_list_mvs, file = file.path("Outputs", "roi_list_mvs.Rdata"))
+
+plt <- ggplot(hc_class_plotting_frame_mvs |> 
+         left_join(name_tibble, by = join_by(run)), 
+       aes(x = x, y = -1*y, fill = tissue_zone_mvs)) + 
+  geom_tile() +
+  theme_void() +
+  facet_wrap("tid", scales = "free", ncol = 2) +
+  scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none") +
+  labs(fill = "ROI")
 ```
+
 
 Visualization of all samples' ROIs.
 
 ```{r vis_class_all_samples, fig.asp=2, fig.width=3.5}
-ggplot(hc_class_plotting_frame %>% 
-         left_join(name_tibble, by = join_by(run)) %>%
-         mutate(roi = case_match(tissue_zone, 
+ggplot(hc_class_plotting_frame |> 
+         left_join(name_tibble, by = join_by(run)) |>
+         mutate(roi = recode_values(tissue_zone, 
                                  "bone" ~ "Bone",
                                  "background" ~ "Background",
                                  "cartilage" ~ "Cartilage")), 
@@ -322,6 +782,383 @@ ggplot(hc_class_plotting_frame %>%
   scale_fill_brewer(palette = "Paired") +
   theme(legend.position = "none") +
   labs(fill = "ROI")
+
+```
+
+## Why not segment all runs at the same time?
+
+A better approach would be to run the sDGMM segmentation on the single `MSImagingExperiment` object, thereby forcing the algorithm to consider every run's spatial distribution in unison. This could potentially make segmentation more comparable across runs but would also overfit to both technical noise (intensity differences that would have been corrected during normalization) and biological differences caused by experimental groups. This would confound the intended effect we want to study, so instead we will cluster independently. 
+
+```{r fig-ROI, results='hide', warning=FALSE, message=FALSE, echo=FALSE}
+p <- ggplot(hc_class_plotting_frame |> 
+         left_join(name_tibble) |>
+         filter(condition=="Control") |>
+         mutate(roi = recode_values(tissue_zone, 
+                                 "bone" ~ "Bone",
+                                 "background" ~ "Background",
+                                 "cartilage" ~ "Cartilage")), 
+       aes(x = x, y = -1*y, fill = roi)) + 
+  geom_tile() +
+  theme_void() +
+  facet_wrap("tid", scales = "free", ncol = 2) +
+  scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none") +
+  labs(fill = "ROI") + 
+  theme(strip.text.x = element_text(size = 18))
+
+ggsave(file.path("Recreated-Figures", 
+        "Figure-ROI-Control.png"), 
+      plot = p, height = 5, width = 6 , units = "in")
+
+p <- ggplot(hc_class_plotting_frame |> 
+    left_join(name_tibble) |>
+    filter(condition=="Osteoarthritis") |>
+         mutate(roi = recode_values(tissue_zone, 
+                                 "bone" ~ "Bone",
+                                 "background" ~ "Background",
+                                 "cartilage" ~ "Cartilage"),
+      lateral = grepl("lateral", run)) |>
+         arrange(lateral), 
+       aes(x = x, y = -1*y, fill = roi)) + 
+  geom_tile() +
+  theme_void() +
+  facet_wrap("tid", scales = "free", ncol = 2) +
+  scale_fill_brewer(palette = "Paired") +
+  theme(legend.position = "none") +
+  labs(fill = "ROI") + 
+  theme(strip.text.x = element_text(size = 18))
+
+ggsave(file.path("Recreated-Figures", 
+        "Figure-ROI-OA.png"), 
+      plot = p, height = 5, width = 6 , units = "in")
+
+features_in_roi_fig <- c(cartilage_feature_ids,background_feature_ids[1])
+  
+m <- mse_list_pp[[1]][features_in_roi_fig,]
+
+
+png(filename = file.path("Recreated-Figures", 
+    "Figure-ROI-Spatial-Dists.png"), 
+    height = 800, 
+    width = 1500,
+    pointsize = 36)
+image(m, i = c(1,2), 
+      layout = c(1,2), 
+      scale = T, 
+      key = F,
+      grid = F,
+      xaxt = "n",
+      yaxt = "n",
+      ylab = NA,
+      xlab = NA,
+      main = "")
+dev.off()
+
+mi <-  as.matrix(t(intensity(m)))
+colnames(mi) <- paste0("feature_", mz(m))
+
+pData(m)$tissue_zone <- roi_list |> 
+filter(run == "6891-OA-lateral") |>
+pull(tissue_zone)
+
+p <- bind_cols(as_tibble(pData(m)), mi) |> 
+  tidyr::pivot_longer(14:15,
+               names_prefix = "feature_",
+               names_to = "mz",
+               values_to = "intensity") |>
+  mutate(tissue_zone_recode = recode_values(tissue_zone, 
+                                         "background" ~ "Background",
+                                         "bone" ~ "Bone",
+                                         "cartilage" ~ "Cartilage",),
+         mz_fct = factor(round(as.numeric(mz),3))) |>
+  filter(is.na(intensity) == F & intensity>0) |>
+  group_by(tissue_zone_recode, mz_fct) |>
+  mutate(mean_intensity = mean(intensity, na.rm = T)) |>
+  ggplot(aes(x = intensity, fill = tissue_zone_recode)) +
+  geom_histogram(bins = 100) +
+  facet_grid(tissue_zone_recode~mz_fct) +
+  xlim(0, 1100) +
+  theme_classic() +
+  theme(legend.position = "none") +
+  ylab(NULL) +
+  xlab("Distribution of Pixel Intensity") +
+  scale_fill_brewer(palette = "Paired") +
+  theme(panel.border = element_rect(fill = NA))
+ggsave(file.path("Recreated-Figures", 
+        "Figure-ROI-Intensity-Dists.png"), 
+      plot = p, height = 2, width = 4, units = "in", scale = 1.5)
+```
+
+```{r cleanup-ROI, echo = FALSE}
+rm(m, sdgmm, 
+  hc_class_plotting_frame, 
+  background_and_bone_features, 
+  cartilage_features, mse_list_pp, 
+  background_and_bone_features_condensed)
+invisible(gc())
 ```
 
 # Normalization
+
+Normalization exists to decrease nuisance variation and enhance signal, but relies on a set of assumptions. Briefly, normalization schemes that scale by a global constant (e.g., TIC, median) assume that few analytes are truly changing and that the amount of signal is constant between spectra. Reference normalization assumes the signal of the reference is constant across spectra. Normalization remains an active field of research, with few definite recommendations available aside from the necessity of some normalization scheme. 
+
+```{r normalization-dependencies, results='hide', warning=FALSE, message=FALSE}
+library(dplyr)
+library(tibble)
+library(data.table)
+library(Cardinal)
+
+source(file.path("Utilities.R"))
+
+RNGkind("L'Ecuyer-CMRG")
+
+setCardinalVerbose(verbose = FALSE)
+
+options(stringsAsFactors = FALSE)
+```
+
+We will perform normalization on the unified dataset.
+
+```{r read-combined-aligned}
+m <- readMSIData(file.path("Data", 
+  "Preprocessing", 
+  "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
+```
+
+Normalization should only be performed on features which represent true biology. Additionally, features with very high intensity - far greater than endogenous analytes - will bias normalization and should be dropped. We will remove the mass calibrant and its isotopes.
+
+```{r remove-background-features}
+bg_mz_approx <- c(1570.6786, 
+                  1571.6801, 
+                  1572.6808, 
+                  1592.6699, 
+                  1593.6739, 
+                  1594.6766)
+
+bg_idx <- features(m, mz=bg_mz_approx) 
+
+m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx])
+```
+
+## A note on sparsity
+
+Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mix of concepts: zero intensity, intensity below the limit of detection, and missing values. Although each is subtly different, they are highly interlinked due to the nature of mass spectrometry. In practice, they behave similarly, but these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries towards zero, especially means. Missing values are often dropped, meaning that summaries are biased larger towards non-missing values. There is no good way around this predicament other than to reduce sparsity by defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
+
+
+## Preparing spectra for median normalization
+
+In our testing, we found median normalization was less biased by outliers than TIC normalization. The trade-off is that TIC normalization is *slightly* more robust to sparsity. Median normalization is simple: compute the median intensity of each m/z value for each pixel, then scale each m/z value of the pixel so that each median is the same. Although simple, this still presents issues. If the median of a spectrum is zero, then the scaled intensity becomes undefined. If we replace zeros with missing values, then recompute the median dropping missing values, the median will be biased larger. There is no easy answer. For this analysis, we chose to replace zeros with NA values, as leaving zeros in would result in zero-inflation of mean abundance at the time of statistical modeling. Zero inflation breaks the assumption that residual values are normally distributed.
+
+Even still, we found that median normalization can be highly biased by outliers. True outliers are rare, but can be of very high magnitude. We chose to clip medians at the 95th percentile to control outliers. These steps are performed in the chunk below using matter's `addProcessing` function to queue steps for parallel processing.
+
+
+```{r apply-na}
+zero_to_na <- function(x, mz) {
+  x[x == 0] <- NA_real_
+  x
+}
+
+clip_95 <- function(vector_ints, mz) {
+    if (all(is.na(vector_ints))) {
+      vector_ints
+    } else {
+      thresh <- quantile(vector_ints, 0.95, na.rm = T) 
+      vector_ints |> 
+        pmin(thresh)
+    }
+}
+
+mse <- m |>
+    addProcessing(zero_to_na, label="zero_to_na_before_median_norm") |>
+    addProcessing(clip_95, label="clip_95percentile") |>
+    process(spectra="intensity", 
+            index="mz", 
+            BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE)) |>
+    summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
+      na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
+    summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
+      na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
+
+```
+
+We also compute the global median (the median of medians, across all spectra in all runs) to use as a final scaling constant. The final constant can be anything, so we chose this value to remain representative.
+
+```{r compute-median-by-pixel}
+pData(mse)$median <- Cardinal::spectrapply(
+    mse,
+    FUN = function(x) stats::median(x, na.rm = TRUE),
+    spectra = "intensity",
+    simplify = TRUE,
+    BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE)
+  )
+
+#sanity check
+min(pData(mse)$median[is.na(pData(mse)$median) == F])
+max(pData(mse)$median[is.na(pData(mse)$median) == F])
+
+grand_median <- median(
+  as.data.table(pData(mse))[, 
+    .(run_median = median(median, na.rm = TRUE)), 
+      by = run][, 
+        run_median]
+)
+```
+
+
+```{r define-normalize-with-median}
+scale_by_median <- function(x, mz, scaling_constant, na.rm = TRUE) {
+  med <- stats::median(x, na.rm = na.rm)
+
+  if (is.na(med)) {
+    warning("scale_by_median: median is NA; returning all NA for that spectrum")
+    return(rep(NA_real_, length(x)))
+  }
+  if (med == 0) {
+    stop("scale_by_median: median == 0 encountered")
+  }
+
+  (scaling_constant / med) * x
+}
+
+```
+
+We now apply normalization. Cardinal does not have a native implementation of median normalization, thus we created our own. As the data are centroided and peak picked, they easily fit in memory.
+
+```{r apply-normalization}
+normalized <- mse |>
+        addProcessing(scale_by_median, label="scale_by_median",
+                      scaling_constant=grand_median, na.rm=TRUE) |>
+        process(spectra="intensity", index="mz", 
+              BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE))
+
+normalized <- normalized |>
+  summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
+    na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
+  summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
+    na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
+```
+
+Finally, save the normalized dataset.
+
+```{r write-normalized-output}
+writeMSIDataSafe(normalized, file.path("Data",
+                                        "Preprocessing",
+                                        "normalized.imzML"))
+```
+
+Below creates figures from the paper.
+```{r fig-peakpicking-b, results='hide', warning=FALSE, message=FALSE}
+png(filename = file.path("Recreated-Figures", 
+      "Figure-Peakpicking-Preprocessed.png"), 
+    height = 500, width = 600, pointsize = 20)
+
+print(plot(normalized, "mean", 
+     ylab = "Mean Pixel Intensity", 
+     run = "6891-OA-lateral",
+     grid = F))
+
+dev.off()
+```
+
+```{r, warning=FALSE, message=FALSE}
+knitr::kable(normalized |>
+  subsetPixels(run == "6891-OA-lateral") |>
+  summarizeFeatures(stat = c("mean", "sd"), na.rm = T) |>
+  fData() |>
+  as_tibble() |>
+  filter(mean != 0 | sd != 0) |>
+  mutate(cv = sd/mean) |>
+  summarise(mean_cv = mean(cv, na.rm = T)))
+```
+
+For the figure comparing p-values from t-tests between ROIs created with univariate segmentation vs. multivariate segmentation, we will test each feature. These steps will be covered in greater detail later.
+```{r}
+load(file.path("Outputs", "roi_list.Rdata"))
+load(file.path("Outputs", "roi_list_mvs.Rdata"))
+
+mse_norm <- readMSIData(file.path("Data",
+                                        "Preprocessing",
+                                        "normalized.imzML")) |>
+      addProcessing(zero_to_na, label="zero_to_na_before_filtering") |>
+      process(spectra="intensity", index="mz", 
+                BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
+                verbose = F)
+
+pData(mse_norm)$tissue_zone <- as.data.table(pData(mse_norm)) |>
+  left_join(roi_list, by = c("x","y","run")) |>
+  dplyr::pull(tissue_zone)
+
+pData(mse_norm)$tissue_zone_mvs <- as.data.table(pData(mse_norm)) |>
+  left_join(roi_list_mvs, by = c("x","y","run")) |>
+  dplyr::pull(tissue_zone_mvs)
+
+get_mse_frame <- function(mse_summ){
+  mse_summ |>
+  fData() |>
+  as_tibble() |>
+  mutate(feature_id = row_number()) |>
+  tidyr::pivot_longer(
+    X6891.OA.lateral.mean:X6954.OA.medial.mean,
+    names_to = "run",
+    values_to = "cartilage.mean",
+    names_pattern = "X(.+)\\.mean$",
+    names_transform = list(run = ~ stringr::str_replace_all(.x, "\\.", "-"))
+  ) |>
+  left_join(name_tibble, by = join_by(run)) |>
+  mutate_at(vars(feature_id, subject, condition, tissue), factor) |> 
+  arrange(feature_id, condition, tissue, subject) |> 
+  select(feature_id, mz, run, cartilage.mean, subject, condition, tissue) |>
+  filter(tissue == "Medial")
+} 
+
+
+mse_cartilage <- mse_norm |>
+  subsetPixels(tissue_zone == "cartilage")
+
+
+mse_frame <-  summarizeFeatures(mse_cartilage, 
+      stat = "mean", 
+      na.rm = T, 
+      group = mse_cartilage$run) |>
+      get_mse_frame()
+
+mse_cartilage_mvs <- mse_norm |>
+  subsetPixels(tissue_zone_mvs == "cartilage")
+
+mse_frame_mvs <-  summarizeFeatures(mse_cartilage_mvs, 
+      stat = "mean", 
+      na.rm = T, 
+      group = mse_cartilage_mvs$run) |>
+      get_mse_frame()
+
+modeling_frame <- mse_frame |>
+  mutate(cartilage.mean.mvs = mse_frame_mvs$cartilage.mean)
+
+library(purrr)
+library(broom)
+
+results <- modeling_frame %>%
+  group_by(feature_id) %>%
+  summarise(
+    t1 = list(tidy(t.test(cartilage.mean ~ condition, var.equal = T))),
+    t2 = list(tidy(t.test(cartilage.mean.mvs ~ condition, var.equal = T))),
+    .groups = "drop"
+  ) %>%
+  tidyr::unnest(t1) %>%
+  tidyr::unnest(t2, names_sep = ".mvs")
+
+results |>
+  ggplot(aes(x = -log10(p.value), y = -log10(t2.mvsp.value))) +
+  geom_hex(bins = 38) +
+  scale_fill_gradient(low = "#ffe6e4f7", high = "#8e0315") +
+  geom_abline(intercept = 0, slope = 1) +
+  labs(x = "Univariate segmentation of representitive markers: -log10(P value)",
+        y = "Multivaratie Segmentation with all features: -log10(P value)",
+        fill = "Count") + 
+  stat_smooth(method = "lm") + 
+  theme_minimal() +
+  coord_equal() +
+  ggpubr::stat_regline_equation(aes(label = ..eq.label..), label.x = 1.25, label.y = .15, color = "blue")
+
+ggsave(file.path("Recreated-Figures", "Figure-ROI-Segmentation-Method-P-Values.png"), height = 5.0, width = 5.3)
+```

@@ -1,6 +1,9 @@
 ---
 title: "4-Statistical-Inference"
-output: html_document
+author: "Ethan Rogers"
+date: "03/20/2026"
+output:
+  html_document: default
 ---
 
 ```{r setup, include=FALSE}
@@ -18,7 +21,7 @@ local({
 })
 ```
 
-Models specify relationships and offer estimates of parameters. Statisical testing quantifies the strength of evidence for specific hypotheses, summarized as a signal to noise ratio (a t-statistic). The signal is the estimate of the comparison to test, such as the difference between means of each condition. The noise is the variance of that estimate. The p-value quantifies the probability of observing a test statistic under the null distribution; the smaller the p-value, the less likely it would be to observe it if the null hypothesis were true and the more evidence there is against the null hypothesis. Testing requires the calculating the degrees of freedom, or in abstract, the amount of information available to estimate different parameters. Somewhat related to the sample size, degrees of freedom are reduced when estimating more parameters and generally increase with more data. As we evaluate more comparisons, we increase the chance of false positives and need to adjust our P values accordingly using a multiple testing correction.
+Models specify relationships and offer estimates of parameters. Statistical testing quantifies the strength of evidence for specific hypotheses, summarized as a signal-to-noise ratio (a t-statistic). The signal is the estimate of the comparison to test, such as the difference between the means of each condition. The noise is the variance of that estimate. The p-value quantifies the probability of observing a test statistic under the null distribution; the smaller the p-value, the less likely it would be to observe it if the null hypothesis were true, and the more evidence there is against the null hypothesis. Testing requires calculating the degrees of freedom, or, more abstractly, the amount of information available to estimate different parameters. Somewhat related to the sample size, degrees of freedom are reduced when estimating more parameters and generally increase with more data. As we evaluate more comparisons, we increase the chance of false positives and need to adjust our p-values accordingly using a multiple testing correction.
 
 # Translate research question(s) to statistical hypothesis
 
@@ -28,90 +31,104 @@ We will test two hypotheses:
 
 -   **Hypothesis B**, *within-subjects*: Lateral vs. Medial, in the Osteoarthritis condition
 
-To test these hypotheses we must express them in terms of the model parameters. We can use the estimated mean intensity of different sets of tissues and conditions. For both hypotheses, we assume that there is no difference between the mean intensity in each set of tissues and conditions. For example, for Hypothesis A, we expect that the estimate is zero, i.e., $\bar{Y}_{Control, Medial} - \bar{Y}_{Osteoarthritis, Medial} = 0$.
+To test these hypotheses, we must express them in terms of the model parameters. We can use the estimated mean intensity of different sets of tissues and conditions. For both hypotheses, we assume that there is no difference between the mean intensity in each set of tissues and conditions. For example, for Hypothesis A, we expect that the estimate is zero, i.e., $\bar{Y}_{Control, Medial} - \bar{Y}_{Osteoarthritis, Medial} = 0$.
 
 In practice, statistical software will do this translation using the structure of the model, but we must still specify to the software what tests we want it to perform.
 
 ## Load required packages
 
-```{r library, results='hide', warning=FALSE, message=FALSE}
+```{r library, include=FALSE, warning=FALSE, message=FALSE}
 library(tidyverse)
-#library(Cardinal)
-library(devtools)
-load_all("~/OtherProjects/Cardinal")
+library(Cardinal)
 library(lmerTest)
 library(emmeans)
-source("Utilities.R")
+source(file.path("Utilities.R"))
+
+setCardinalVerbose(verbose = FALSE)
+gcinfo(verbose = FALSE)
 ```
 
 # Test hypotheses of interest
 
-Like statistical modeling, we perform statistical testing in Cardinal, or externally. Both approaches require specifying a contrast. Formally a contrast is a linear combination of coefficients for each term in the model that sum to zero. More simply, a contrast is a set of coefficients that when multiplied in sequence with the model parameter estimates sums to the estimate of the comparison being tested in the hypothesis that uses all model terms. We generally don't have to specify them ourselves, and can instead use the terms of the model or design with the statistical packages.
+Like statistical modeling, we perform statistical testing in Cardinal or externally. Both approaches require specifying a contrast. Formally, a contrast is a linear combination of coefficients for each term in the model that sum to zero. More simply, a contrast is a set of coefficients that, when multiplied in sequence with the model parameter estimates, sums to the estimate of the comparison being tested in the hypothesis that uses all model terms. We generally don't have to specify them ourselves and can instead use the terms of the model with standard statistical packages.
 
 ## Method 1: Comparison testing in Cardinal
 
-`Cardinal::contrast()` offers arguments to specify custom contrasts using `emmeans` syntax and performed by `emmeans`. First, we will load the `meansTest` results object from 3-Statisical-Modeling. The results object contains a summary dataframe accessible with `mtops()` and the `lmer` models.
+`Cardinal::contrast()` offers arguments to specify custom contrasts using `emmeans` syntax and performed using `emmeans`. First, we will load the `meansTest` results object from 3-Statistical-Modeling. The results object contains a summary data frame accessible with `mtops()` and the `lmer` models. We will also load the results from manual diagnosis of model fit, creating a list of features that adequately meet model assumptions.
+
 
 ```{r load_imzML}
-load("Outputs/meansTest_cartilage_lmer.RData")
+load(file.path("Outputs", "meansTest_cartilage_lmer.RData"))
+
+model_fit_eval <- read_csv(file.path("Outputs", "feature-model-fit-evaluation.csv"), show_col_types = FALSE) |> 
+  mutate(across(qq_normality:outliers, as.factor))
+
+passed <- model_fit_eval |> 
+          filter(qq_normality == "OK" & 
+            residual_variance == "OK" & 
+            outliers == "OK" )
+
 ```
 
 ### Run tests
 
-In `emmeans`, what Cardinal uses for hypothesis testing and what we will use externally, we can specify `~ condition | tissue` as `contrast.specs` for Hypothesis A, aka "condition given tissue". To get the actual pairwise contrasts, we supply `"pairwise"` as the `contrast.method`. `emmeans` offers tremendous functionality and versatility, with [many possible ways to specify contrasts](https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html). We will explore other syntax when we repeat theses analyses externally from Cardinal in the next part of this workflow.
-
-We will rerun meansTests with the appropriate contrast arguments, muting the outputs for brevity.
+In `emmeans`, which Cardinal uses for hypothesis testing and which we will use externally, we can specify `~ condition | tissue` as `contrast.specs` for Hypothesis A (i.e., "condition given tissue"). To get the actual pairwise contrasts, we supply `"pairwise"` as the `contrast.method`. `emmeans` offers tremendous functionality and versatility, with [many possible ways to specify contrasts](https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html). We will explore other syntax when we repeat these analyses externally from Cardinal in the next part of this workflow.
 
 ```{r, results='hide', message=FALSE, warning=FALSE}
-h <- Cardinal::contrast(lmer_means_test, ~condition * tissue)
+
+measTest_models_with_acceptable_fit <- lmer_means_test[passed$feature_id]
+
+h <- Cardinal::contrastTest(measTest_models_with_acceptable_fit, ~condition * tissue, method="pairwise")
 ```
 
-Cardinal adds tests to the results object in a wide fashion, with each test having an identifying prefix. Here are the results from the second feature model and the set of tests that include Hypothesis A:
+Cardinal adds tests to the results object in a wide fashion, with each test having an identifying prefix. That is quite ugly, so below is an example of the `emmeans` object returned for each model, in this case the first feature model for `r round(h@elementMetadata[1,2], 3)` m/z.
 
 ```{r}
-h[[2]]
+knitr::kable(h[[1]])
 ```
 
-Notice there are two sets of tests: `contrast.pairwise.Control.vs.Osteoarthritis.at.Lateral_*` and `contrast.pairwise.Control.vs.Osteoarthritis.at.Medial_*`. As we can see `emmeans` conducted Control vs Osteoarthritis in both levels of tissue (Lateral and Medial). **For our purposes, we only care about the last comparison,** `contrast.pairwise.Control.vs.Osteoarthritis.at.Medial_*`. Each comparison offers an `estimate`, `t_ratio`, and `p_value`. The `estimate` is the effect estimate and `t_ratio` the signal (estimate) to noise (standard error of the estimate) ratio.
+Notice there are six tests - every pairwise combination of the 4 (2x2) unique levels of condition and tissue. For our purposes, we only care about the `Control Medial - Osteoarthritis Medial` (hypothesis A) and `Osteoarthritis Lateral - Osteoarthritis Medial` (hypothesis B). Each comparison offers an `estimate`, `t_ratio` (aka t-statistic), and `p_value`. The `estimate` is the effect estimate and `t_ratio` the signal (estimate) to noise (standard error of the estimate) ratio. To get the reverse, say, `Osteoarthritis Medial - Osteoarthritis Lateral`, simply flip the sign of the estimate and t ratio. All else will be the same.
 
-We can see that the P value is large (`r cat("contrast.pairwise.Control.vs.Osteoarthritis.at.Medial_p_value=",h1[2]@elementMetadata[[12]], sep = "")`), on the second m/z feature (m/z = `r round(mz(all_mse)[2],3)`) from Hypothesis A above, signifying that we cannot reject the null hypothesis, that any difference in mean abundance of `r round(mz(all_mse)[2],3)` m/z between conditions in medial tissues is not statistically significant.
+We can see that the p-value is large for `r round(h@elementMetadata[1,2], 3)` m/z from Hypothesis A above, indicating that we cannot reject the null hypothesis; any difference in mean abundance between conditions in medial tissues is not statistically significant.
 
 ### Correct for multiple testing
 
-Running more tests increases the probability that one of the tests will be a false positive. We can correct for this in a variety of ways, such by globally lowering the threshold for significance (such as the Bonferroni correction). The preferred method however is to correct the false discovery rate (FDR), or the probability a positive test is actually false. By setting an acceptable rate of positive tests that are false, in our case 0.05 (5%) per hypothesis, we can apply a less strict correction. Cardinal includes a function for FDR correction, `topFeatures`.
+Running more tests increases the probability that one of the tests will be a false positive. We can correct for this in a variety of ways, such as globally lowering the threshold for significance (e.g., the Bonferroni correction). The preferred method, however, is to correct the false discovery rate (FDR), or the false-positive rate of just our positive tests. By setting an acceptable rate of positive tests that are false (in our case 0.05, or 5%, independently per hypothesis), we can apply a less strict correction. Cardinal includes a function for FDR correction, `topFeatures`.
 
 ```{r}
-topFeatures(h, n=5, sort.by = 2)
+kableExtra::kbl(topFeatures(h, n=5, sort.by = 2)) |>
+  kableExtra::kable_styling(full_width = FALSE) |>
+  kableExtra::scroll_box(width = "100%", height = "200px")
 ```
 
-`topFeatures` applies FDR correct to every set of P values independently. This is important because FDR correction is sensitive to the distribution of P values. We will explore this later. Now, lets extract our P values and see if any are significant.
+`topFeatures` applies FDR correction to every set of p-values independently. This is important because FDR correction is sensitive to the distribution of p-values. We will explore this later. Now, let's extract our p-values and see if any are significant.
 
 ```{r}
-results_tibble_h1 <- as_tibble(topFeatures(h1)) |> 
-  select(i, mz, starts_with("contrast.pairwise.Control.vs.Osteoarthritis.at.Medial")) |> 
-  rename_with(~ str_remove(.x, ".*?_"), 
-  starts_with("contrast")) |> 
-    arrange(p_value)|> 
-    mutate(hypo = "Hypothesis A")
+results_tibble_h1 <- as_tibble(topFeatures(h)) |> 
+  select(i, mz, starts_with("Control.Medial...Osteoarthritis.Medial.")) |> 
+  rename_with(~ str_remove(.x, fixed("Control.Medial...Osteoarthritis.Medial.")), 
+              starts_with("Control.Medial...Osteoarthritis.Medial.")) |> 
+  arrange(pvalue) |> 
+  mutate(hypo = "Hypothesis A")
 
-results_tibble_h2 <- as_tibble(topFeatures(h2)) |> 
-  select(i, mz, starts_with("contrast.pairwise.Lateral.vs.Medial.at.Osteoarthritis")) |> 
-  rename_with(~ str_remove(.x, ".*?_"), 
-  starts_with("contrast")) |> 
-    arrange(p_value) |> 
-    mutate(hypo = "Hypothesis B")
+
+results_tibble_h2 <- as_tibble(topFeatures(h)) |> 
+  select(i, mz, starts_with("Osteoarthritis.Lateral...Osteoarthritis.Medial.")) |> 
+  rename_with(~ str_remove(.x, fixed("Osteoarthritis.Lateral...Osteoarthritis.Medial.")), 
+              starts_with("Osteoarthritis.Lateral...Osteoarthritis.Medial.")) |> 
+  arrange(pvalue) |> 
+  mutate(hypo = "Hypothesis B")
 
 knitr::kable(rbind(results_tibble_h1, results_tibble_h2) |> 
-    mutate(`Significant at 0.1 after FDR adjustment` = p_value_fdr < 0.1) |> 
-    group_by(hypo, `Significant at 0.1 after FDR adjustment`) |> 
-    dplyr::summarize(Count = dplyr::n()))
+    mutate(`Significant at 0.1 after FDR adjustment` = fdr < 0.1) |> 
+    dplyr::summarize(Count = dplyr::n(), .by = c(hypo, `Significant at 0.1 after FDR adjustment`)))
 ```
 
-Unfortunatly, after adjustment, no findings for either hypothesis are significant. Regardless, lets make a volcano plot using the unadjusted P values. We will add a line at unadjusted P = 0.01. (Keep in mind this plot may look different that the one in the accompanying publication as this plot used the estimate rather than the percent difference. We will show that plot below.)
+Unfortunately, after adjustment, no findings for either hypothesis are significant. Regardless, let's make a volcano plot using the unadjusted p-values. We will add a line at unadjusted p = 0.01. (Keep in mind this plot may look different than the one in the accompanying publication, as it uses the estimate rather than the percent difference and may use the flipped comparison. These do not affect the significance. We will show that plot below.)
 
 ```{r}
 rbind(results_tibble_h1, results_tibble_h2) |> 
-    ggplot(aes(x = estimate, y = -log(p_value))) +
+    ggplot(aes(x = estimate, y = -log(pvalue))) +
     geom_point(alpha = 0.25) +
     facet_wrap("hypo") +
     geom_hline(yintercept = -log(0.01)) +
@@ -121,16 +138,18 @@ rbind(results_tibble_h1, results_tibble_h2) |>
 
 ## Method 2: Comparison testing externally
 
-Like in Cardinal, we will test comparisons externally with `emmeans` again, showing multiple ways to specify the same comparison. First lets load the models we fit in the last vignette.
+Like in Cardinal, we will test comparisons externally with `emmeans` again, showing multiple ways to specify the same comparison. First, let's load the models we fit in the last vignette.
 
 ```{r}
-load(file.path("Outputs","cartilage_lmer_results.RData"))
+load(file.path("Outputs","cartilage_results.RData"))
+
+cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
 ```
 
-We will write a function to perform test hypotheses for each model, but first lets experiment with different ways to specify contrasts in `emmeans`, using the second feature model, `r round(mz(all_mse)[2],3)` m/z.
+We will write a function to perform test hypotheses for each model, but first, let's experiment with different ways to specify contrasts in `emmeans`, again using the model for `r round(h@elementMetadata[1,2], 3)` m/z.
 
 ```{r}
-m <- cartilage_res[[1]][[2]]
+m <- cartilage_models_OK_fit[[1]]
 ```
 
 ### Run tests
@@ -169,11 +188,10 @@ contrast(emmeans_grid,
          adjust = "none")
 ```
 
-Now, lets write a function to test Hypothesis A and B on all models. This function also extracts the mean estimate for the reference so that we can compute the percent change.
+Now, let's write a function to test Hypothesis A and B on all models. This function also extracts the mean estimate for the reference so that we can compute the percent change.
 
 ```{r}
-# Run contrasts
-signift_cartilage <- bind_rows(lapply(cartilage_res[[1]], FUN = function(m){
+signift_cartilage <- bind_rows(lapply(cartilage_models_OK_fit, FUN = function(m){
     emmeans_grid <- emmeans(m, ~ condition * tissue, lmer.df = "satterthwaite")
     k <- contrast(emmeans_grid,
          list(control_vs_osteoarthritis_in_medial = c(0, 0, 1, -1),
@@ -184,39 +202,108 @@ signift_cartilage <- bind_rows(lapply(cartilage_res[[1]], FUN = function(m){
                 (condition == "Osteoarthritis" & tissue == "Lateral"))  |> 
                 arrange(desc(tissue)) |> pull(emmean)) |> 
                     mutate(pct_delta = estimate/reference_estimate)
-    }), .id = "feature_id")
-
-rmarkdown::paged_table(head(signift_cartilage))
-```
-
-### Correct for multiple testing
-
-As above, we will correct for multiple testing using the FDR method and construct a volcano plot. We have also flipped the comparison to harmonize these results with the accompanying journal article (positive difference mean greater abundance in osteoarthritis conditions or medial tissues).
-
-```{r}
-signift_cartilage |> 
+    }), .id = "feature_id") |> 
   group_by(contrast) |> 
   mutate(p_value_fdr = p.adjust(p.value, method = "fdr")) |> 
   ungroup() |> 
   mutate(signif_after_fdr_adj = p_value_fdr < 0.1) |> 
-  arrange(p.value) |> 
-  ggplot(aes(x = -1*pct_delta, y = -log(p.value))) +
-  geom_point(alpha = 0.25) +
-    facet_wrap("contrast") +
-    geom_hline(yintercept = -log(0.01)) +
-    xlab("Estimated Percent Difference") +
-    ylab("-Log(Unadjusted P Value)")
+  arrange(p.value)
+
+save(signift_cartilage, file = file.path("Outputs", "signift_cartilage.RData"))
+
+knitr::kable(head(signift_cartilage))
+```
+
+### Correct for multiple testing
+
+As above, we will correct for multiple testing using the FDR method and construct a volcano plot. We have also flipped the comparison to harmonize these results with the accompanying journal article (positive differences mean greater abundance in osteoarthritis conditions or medial tissues).
+
+```{r}
+signift_cartilage |>
+  ggplot(aes(x = -1 * pct_delta, y = -log10(p.value), color = signif_after_fdr_adj)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_hline(yintercept = -log10(0.01), linetype = "dashed", color = "gray40") +
+  facet_wrap(~contrast, labeller = labeller(contrast = c(
+    "control_vs_osteoarthritis_in_medial" = "OA vs. Control in Medial",
+    "lateral_vs_medial_in_osteoarthritis" = "Medial vs. Lateral in OA"
+  ))) +
+  scale_x_continuous(labels = scales::percent) +
+  scale_color_manual(
+    values = c("TRUE" = "#E41A1C", "FALSE" = "gray50"),
+    labels = c("TRUE" = "Significant", "FALSE" = "Not significant"),
+    name = "FDR-adjusted"
+  ) +
+  labs(
+    x = "Estimated Percent Difference",
+    y = expression(-log[10](italic(P)~value))
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "white", color = "black"),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+
+  ggsave(file.path("Recreated-Figures", "Figure-Statistical-Inference-Volcano.png"), height = 5.75, width = 6, units = "in")
+
 ```
 
 ## Inspecting the distributions of unadjusted P values for test interdependence
 
-When performing multiple tests, the distribution of P values can reveal information about the independence of the tests. If the tests are independent, we expect either uniform (when few tests are significant) or a right skewed distribution with a peak near zero (when many tests are significant). Deviations from this pattern can indicate that the tests are not independent, which can affect the performance of multiple testing corrections.
+When performing multiple tests, the distribution of p-values can reveal information about the independence of the tests. If the tests are independent, we expect either a uniform distribution (when few tests are significant) or a right-skewed distribution with a peak near zero (when many tests are significant). Deviations from this pattern can indicate that the tests are not independent, which can affect the performance of multiple testing corrections.
 
 ```{r}
 signift_cartilage |> 
   ggplot(aes(x = p.value)) +
-  geom_histogram(bins = 50) +
-    facet_wrap("contrast")
+  geom_histogram(bins = 7, fill = "gray50", color = "white", boundary = 0) +
+  facet_wrap(~contrast, labeller = labeller(contrast = c(
+    "control_vs_osteoarthritis_in_medial" = "OA vs. Control in Medial",
+    "lateral_vs_medial_in_osteoarthritis" = "Medial vs. Lateral in OA"
+  ))) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.2)) +
+  labs(
+    x = expression(italic(P)~value),
+    y = "Count"
+  ) +
+  theme_bw(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    strip.background = element_rect(fill = "white", color = "black"),
+    strip.text = element_text(face = "bold")
+  )
+  ggsave(file.path("Recreated-Figures", "SI-Figure-Statistical-Inference-PValue-Dists.png"), height = 5.75, width = 6, units = "in")
 ```
 
-As the distribution of P values is neither uniform or right skewed, there may be some interdependence between tests. This is not surprising as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `qvalue` package.
+As the distribution of p-values is neither uniform nor right-skewed, there may be some interdependence between tests, but this is hard to verify with so few tests overall. It would not be surprising were there interdependence however, as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `locfdr` package.
+
+This code below will recreate the tables and figures from the manuscript.
+```{r, results='hide', warning=FALSE, message=FALSE, output = "hide"}
+knitr::kable(model_fit_eval |> select(-c(feature_id)))
+
+signift_cartilage |> 
+  filter(contrast == "control_vs_osteoarthritis_in_medial") |>
+  mutate(feature_id = as.integer(feature_id)) |>
+  left_join(passed) |>
+  mutate(`M/Z` = round(mz, 3),
+          Estimate = round(estimate, 3),
+          Std.Error = round(SE, 3),
+          `P Value` = round(p.value, 3),
+          `FDR Adj. P value` = round(p_value_fdr, 3)) |>
+  select(`M/Z`, Estimate, Std.Error, `P Value`, `FDR Adj. P value`) |> 
+  arrange(`P Value`) |>
+  knitr::kable()
+
+signift_cartilage |> 
+  filter(contrast == "lateral_vs_medial_in_osteoarthritis") |>
+  mutate(feature_id = as.integer(feature_id)) |>
+  left_join(passed) |>
+  mutate(`M/Z` = round(mz, 3),
+          Estimate = round(estimate, 3),
+          Std.Error = round(SE, 3),
+          `P Value` = round(p.value, 3),
+          `FDR Adj. P value` = round(p_value_fdr, 3)) |>
+  select(`M/Z`, Estimate, Std.Error, `P Value`, `FDR Adj. P value`) |> 
+  arrange(`P Value`) |>
+  knitr::kable()
+```

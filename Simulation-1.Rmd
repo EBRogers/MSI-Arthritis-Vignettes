@@ -1,0 +1,827 @@
+---
+title: "Simulation-1"
+author: "Ethan Rogers"
+date: "03/20/2026"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+local({
+  hook_output <- knitr::knit_hooks$get('output')
+  knitr::knit_hooks$set(output = function(x, options) {
+    if (!is.null(options$max.height)) options$attr.output <- c(
+      options$attr.output,
+      sprintf('style="max-height: %s;"', options$max.height)
+    )
+    hook_output(x, options)
+  })
+})
+```
+
+Simulation 1 was designed to evaluate the performance of multivariate clustering methods, specifically spatial shrunken centroids and spatial K means, for ROI segmentation and its downstream effects on testing for differential abundance. We will create images with spatially autocorrelated background noise and clearly defined ROIs. All samples will share a set of features that clearly and consistently define regions of interest and a set of nuisance features, which do not contain the ROI. Finally, there will be 500 features that have differentially abundant effects in the ROIs only. We will then segment the ROIs with two methods and review the results.
+
+# Load dependencies
+
+```{r load-dependencies, message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(data.table)
+library(Cardinal)
+library(broom)
+
+source("Utilities.R")
+source("SimulationUtilities.R")
+
+RNGkind("L'Ecuyer-CMRG")
+setCardinalVerbose(verbose = FALSE)
+```
+
+# Simulation overview
+
+The simulation begins with an existing list of image objects saved as `sim_list_original`. These are the same base images that will be used for Simulation 2, and were simulated using Cardinal's `simulateImage` function.
+
+The major ingredients are:
+
+- a shared baseline intensity level
+- feature-specific pixel standard deviations
+- feature-level effects where true signal exists
+- residual variation
+
+# Define the baseline image structure
+
+We first define a feature baseline and a per-feature target standard deviation. The simulation uses 3000 features and a 100 x 100 pixel grid.
+
+```{r baseline-setup}
+baseline <- 80
+set.seed(2025)
+pixel_sd_base <- 50
+pixel_sd <- rnorm(3000, mean = pixel_sd_base, sd = 7) + 5
+
+if (any(pixel_sd < 5)) {
+  warning("Some pixel_sd values are below 5", call. = FALSE, immediate. = TRUE)
+}
+
+pdx <- PositionDataFrame(expand_grid(x = 1:100, y = 1:100))
+pdx$all <- TRUE
+fdx <- MassDataFrame(1:3000)
+fdx$all <- baseline
+```
+
+This simulation does enforce the assumption that not every pixel will have the same standard deviation, and that standard deviations of pixels are normally distributed. As sd cannot be negative, we will arbitrarily increase values to avoid this. We will also flag very small values for pixel sd.
+
+# Define the sample structure
+
+The simulation uses 16 samples, corresponding to 8 subjects crossed with a binary tissue indicator and a binary condition indicator.  We will make this design more complex than necessary to assist with our simulations later.
+
+```{r sample-metadata}
+samples <- data.frame(
+  subject = c(1:8, 1:8),
+  tissue = c(rep(0, 8), rep(1, 8)),
+  condition = c(rep(0, 4), rep(1, 4), rep(0, 4), rep(1, 4))
+) |>
+  mutate(id = paste0(subject, "_", tissue, "_", condition))
+
+knitr::kable(samples)
+```
+
+This layout is intentionally simple. The goal is not to reproduce every detail of the experimental design from the real data, but to create a structured setting where signal can be attached to condition, tissue, or both, and then tested after segmentation.
+
+# Create the simulation starting images
+
+
+The code below was used to generate the base images for the Simulation 1 and 2. Theoretically it can be replicated with the code below, but the use of MulticoreParam and RNG seeds complicates random number generation, and may generate different results on different machines. We will instead load the images from the RData object supplied on MassIVE.
+
+```{r load-simulation-base}
+
+#set.seed(123, kind = "L'Ecuyer-CMRG")
+#sim_list_original <- list()
+# for (i in 1:nrow(samples)) {
+#   sim_list_original[[i]] <- simulateImage(pdx,
+#                                           fdx, 
+#                                           sdpixel = pixel_sd, 
+#                                           sdrun = 0, 
+#                                           sdmz = 0, 
+#                                           sdmult = 0, 
+#                                           sdpeaks = 0, 
+#                                           sdnoise = 0.0, 
+#                                           SAR = FALSE, 
+#                                           baseline = 0,
+#                                           spcorr = 0.5,
+#                                           centroided = TRUE, 
+#                                           verbose = TRUE,
+#                                           BPPARAM=SnowfastParam())
+#}
+
+#save(sim_list_original, file = file.path("Simulation-Data", "sim_list_original.RData"))
+
+load(file.path("Data", "Simulation-Data", "sim_list_original.RData"))
+```
+
+# Define feature-level effects and variance components
+
+The next block is where the important simulation assumptions are encoded. We specify:
+
+- `delta_in_roi`, the magnitude of the condition or tissue effect in the ROI
+- `ROI_def_delta`, the magnitude of the intensity difference between the background and ROI in ROI defining features
+- `resid`, the residual variation scale
+
+```{r effect-parameters}
+delta_in_roi <- 30
+resid <- sqrt(70)
+
+ROI_def_delta <- 40
+```
+
+The simulation then builds feature-wise effects, encoded as vectors for use when simulating later.
+
+```{r effect-vectors}
+set.seed(2024)
+effects_normal <- tibble(
+  mz = mz(sim_list_original[[1]]),
+  condition = c(rep(0, 2500), rep(-1 * delta_in_roi, 250), rep(delta_in_roi, 250)),
+  ROI_defining_features = c(rep(ROI_def_delta, 50), rep(-ROI_def_delta, 50), rep(0, 2900))
+)
+```
+
+The above code does several things. First, it makes only a subset of features truly differential. That is necessary if we want to talk meaningfully about both true *and* false positives later. Second, it separates the features that define the ROI from the features that carry the condition effect. This is to mirror the real world situation that the biological structures (that one might want to segment ROIs of) have features that define them as well as change within them. The methods can use any features of the feature set to draw the ROIs.
+
+
+# Generate residual variation
+
+We next generate a sample-by-feature residual variation matrix.
+
+```{r variance-matrices}
+set.seed(2026)
+residual_mat <- matrix(rnorm(16 * nrow(effects_normal), sd = resid), nrow = 16)
+residual_mat <- scale(residual_mat, center = TRUE, scale = FALSE)
+```
+
+This keeps the active simulation relatively easy to interpret: the feature-level fixed effects determine where signal should appear, while `residual_mat` controls how much those means fluctuate from sample to sample. We will scale this matrix so its center is zero, thus enforcing the assumption that residual variation does not systemically bias the effect up or down.
+
+# Construct the target mean structures
+
+The next step combines the fixed effects, ROI-defining features, residual variation, and baseline into mean intensity targets for the ROI and the background.
+
+```{r target-mean-matrices}
+effects_matrix_c2 <- sapply(1:16, function(i) {
+  samples[[i, "condition"]] * effects_normal$condition +
+    effects_normal$ROI_defining_features +
+    residual_mat[i, ] +
+    baseline
+})
+
+effects_matrix_bg <- sapply(1:16, function(i) {
+  -1 * effects_normal$ROI_defining_features +
+    residual_mat[i, ] +
+    baseline
+})
+```
+
+Features that define the ROI are pushed in opposite directions inside and outside the ROI. Separately, the condition effect is restricted to the final 500 features in the ROI.
+
+A simple safety check follows.
+
+```{r effect-sanity-check}
+i <- 1
+for (eff in c(effects_matrix_bg,
+              effects_matrix_c2)) {
+  if (any(eff < 0)) {
+    stop(paste0("Some effects in ", i, " have negative means."))
+  }
+  i <- i + 1
+}
+```
+
+Negative means would be inconsistent with real world MSI data.
+
+# Build the oracle ROI into each image
+
+We now define the actual pixels that make up the ROI and the background then apply the effects generated above.
+
+```{r build-oracle-roi, message=FALSE, warning=FALSE}
+utils_path <- normalizePath("SimulationUtilities.R")
+
+sim_list_adj <- bplapply(seq_along(sim_list_original), FUN = function(i,
+                                                                     sim_list_original,
+                                                                     pixel_sd,
+                                                                     effects_matrix_bg,
+                                                                     effects_matrix_c2,
+                                                                     utils_path) {
+  source(utils_path)
+  m <- sim_list_original[[i]]
+  runNames(m) <- paste0("run_", i)
+
+  intensity(m) <- scale_row_sd_mean_subset(
+    as.matrix(intensity(m)),
+    target_sd = pixel_sd,
+    target_mean = effects_matrix_bg[, i]
+  )
+
+  pData(m) <- addShape(addShape(pData(m), c(50, 50), 20, name = "circle_1"),
+                       c(50, 50), 40, name = "circle_2")
+
+  pData(m)$circle_2 <- ifelse(pData(m)$circle_2 & pData(m)$circle_1,
+                              FALSE,
+                              pData(m)$circle_2)
+
+  pData(m)$bg <- ifelse(pData(m)$circle_2, FALSE, TRUE)
+
+  intensity(m) <- scale_row_sd_mean_subset(
+    as.matrix(intensity(m)),
+    target_sd = pixel_sd,
+    columns_to_scale = pData(m)$circle_2,
+    target_mean = effects_matrix_c2[, i]
+  )
+
+  summarizeFeatures(
+    summarizeFeatures(
+      m,
+      stat = c("mean", "sd"),
+      na.rm = TRUE,
+      verbose = FALSE,
+      groups = ifelse(pData(m)$circle_2, "oracle_donut", "other")
+    ),
+    stat = c("mean", "sd"),
+    na.rm = TRUE,
+    verbose = FALSE
+  )
+},
+sim_list_original = sim_list_original,
+pixel_sd = pixel_sd,
+effects_matrix_bg = effects_matrix_bg,
+effects_matrix_c2 = effects_matrix_c2,
+utils_path = utils_path,
+BPPARAM = SnowfastParam(8))
+```
+
+# Segment the simulated images with two methods
+
+Now we shall segment the images using the techniques mentioned above. We used iterative testing to determine the ideal number of clusters, and for spatial shrunken centroids (SSC), the range of the regularization parameter. SSC used 4 clusters with multiple regularization values. The second is spatial k-means (SKM), using seven clusters. Both are run separately on each simulated image. This process is computationally intensive. Adjust the BPPARAMs accordingly.
+
+```{r run-segmentation, message=FALSE, warning=FALSE}
+sscl <- bplapply(sim_list_adj, FUN = function(m) {
+  set.seed(123456789, kind = "L'Ecuyer-CMRG")
+  spatialShrunkenCentroids(m, k = 4, s = c(6, 9, 12, 15), weights = "adaptive")
+}, BPPARAM = SnowfastParam(8))
+
+skml_7c <- bplapply(sim_list_adj, FUN = function(m) {
+  set.seed(123456789, kind = "L'Ecuyer-CMRG")
+  spatialKMeans(m, k = 7, weights = "adaptive")
+}, BPPARAM = SnowfastParam(8))
+```
+
+# Extract ROI summaries for modeling
+
+After segmentation, helper functions from `SimulationUtilities.R` identify the ROI candidates, select representative clusters, and extract feature summaries for modeling.
+
+`analyze_spatial_clusters` and `analyze_spatial_clusters_skm` take the results generated from above, score the clusters against an “oracle” ROI annotation in each simulation, and then select the best-matching ROI-like cluster from each simulation—keeping only the top n_top_per_condition simulations per condition based on that score. The scoring process is mean to make this simulation rigorous and to somewhat reproduce the input of the experimenter. The exact boundaries of the ROI are unknown, but the experimenter has an idea of what it should look like - the donut. Thus, segmentation results that most conform to that are chosen.
+
+```{r analyze-segmentation-results}
+results_list <- analyze_spatial_clusters(
+  sscl,
+  sim_list_adj,
+  samples,
+  n_top_per_condition = 4,
+  n_top_features = 20
+)
+
+results_list_skm_7c <- analyze_spatial_clusters_skm(
+  skml_7c,
+  sim_list_adj,
+  samples,
+  n_top_per_condition = 4,
+  n_top_features = 20
+)
+```
+
+# Fit the downstream models
+
+The simulation compares three ROI definitions:
+
+- the ROI recovered by spatial shrunken centroids
+- the ROI recovered by spatial k-means
+- the oracle donut ROI
+
+For each, the code extracts feature-level ROI means and fits condition-only models. `extract_data_for_modeling_alt` pulls the intensity means out from the ROIs selected above, formatting them with the sample metadata for modeling. `run_models_no_me` runs standard linear regression models (without mixed effects) using `lm`. For a design this simple with one categorical independent variable and a continuous dependent variable, these models are equivalent to an ANOVA.
+
+```{r fit-models, results='hide', message=FALSE, warning=FALSE}
+mse_frame_to_test <- extract_data_for_modeling_alt(
+  results_list[["sim_to_test"]],
+  results_list[["samples_to_test"]]
+)
+
+run_models_to_test_ssc_roi <- run_models_no_me(
+  mse_frame_to_test,
+  formu = "ssc_roi.mean ~ condition",
+  verbose = FALSE
+)
+
+run_models_to_test_oracle_roi <- run_models_no_me(
+  mse_frame_to_test,
+  formu = "oracle_donut.mean ~ condition",
+  verbose = FALSE
+)
+
+mse_frame_to_test_skm_7c <- extract_data_for_modeling_alt(
+  results_list_skm_7c[["sim_to_test"]],
+  results_list_skm_7c[["samples_to_test"]]
+)
+
+run_models_to_test_skm_roi_7c <- run_models_no_me(
+  mse_frame_to_test_skm_7c,
+  formu = "skm_roi.mean ~ condition",
+  verbose = FALSE
+)
+```
+
+# Compare which samples were selected for figures
+
+The section below finds treatment and control examples that were identified by both SSC and SKM, then uses them for visualization.
+
+```{r identify-charting-samples}
+trt_sample_id <- intersect(
+  results_list[[3]] |> filter(condition == 1) |> pull(id),
+  results_list_skm_7c[[3]] |> filter(condition == 1) |> pull(id)
+)[1]
+
+control_sample_id <- intersect(
+  results_list[[3]] |> filter(condition == 0) |> pull(id),
+  results_list_skm_7c[[3]] |> filter(condition == 0) |> pull(id)
+)[1]
+
+```
+
+# Visualize the simulated images and ROI definitions
+
+Let's visualize the simulated images, so we can get a better idea of what everything looks like.
+
+### Example of ROI defining features, shared by both conditions
+
+```{r contextual-simulation-images, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
+
+save_cardinal_plot <- function(filename, expr, width = 600, height = 1200) {
+  png(filename = file.path("Recreated-Figures", filename), width = width, height = height)
+  on.exit(dev.off(), add = TRUE)
+  print(eval.parent(substitute(expr)))
+}
+
+m_context <- cbind(
+  sim_list_adj[[which(samples$id == control_sample_id)]],
+  sim_list_adj[[which(samples$id == trt_sample_id)]]
+)
+
+ground_truth_roi_defining_plot <- image(
+  m_context,
+  i = c(1),
+  layout = c(2, 1),
+  scale = TRUE,
+  superpose = FALSE,
+  key = FALSE,
+  grid = FALSE,
+  xaxt = "n",
+  yaxt = "n",
+  ylab = NA,
+  xlab = NA
+)
+save_cardinal_plot(
+  "Figure-ROI-Simulation-1-Ground-Truth-ROI-Defining.png",
+  image(
+    m_context,
+    i = c(1),
+    layout = c(2, 1),
+    scale = TRUE,
+    superpose = FALSE,
+    key = FALSE,
+    grid = FALSE,
+    xaxt = "n",
+    yaxt = "n",
+    ylab = NA,
+    xlab = NA
+  )
+)
+ground_truth_roi_defining_plot
+```
+
+### Example of features without condition effects or ROIs, shared by both conditions
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
+ground_truth_no_effect_plot <- image(
+  m_context,
+  i = c(1000),
+  layout = c(2, 1),
+  scale = TRUE,
+  superpose = FALSE,
+  key = FALSE,
+  grid = FALSE,
+  xaxt = "n",
+  yaxt = "n",
+  ylab = NA,
+  xlab = NA
+)
+save_cardinal_plot(
+  "Figure-ROI-Simulation-1-Ground-Truth-No-Effect.png",
+  image(
+    m_context,
+    i = c(1000),
+    layout = c(2, 1),
+    scale = TRUE,
+    superpose = FALSE,
+    key = FALSE,
+    grid = FALSE,
+    xaxt = "n",
+    yaxt = "n",
+    ylab = NA,
+    xlab = NA
+  )
+)
+ground_truth_no_effect_plot
+```
+
+### Example of differential abundant features where the effect differs by conditions
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
+ground_truth_diff_abun_plot <- image(
+  m_context,
+  i = c(2700),
+  layout = c(2, 1),
+  scale = TRUE,
+  superpose = FALSE,
+  key = FALSE,
+  grid = FALSE,
+  xaxt = "n",
+  yaxt = "n",
+  ylab = NA,
+  xlab = NA
+)
+save_cardinal_plot(
+  "Figure-ROI-Simulation-1-Ground-Truth-Diff-Abundance.png",
+  image(
+    m_context,
+    i = c(2700),
+    layout = c(2, 1),
+    scale = TRUE,
+    superpose = FALSE,
+    key = FALSE,
+    grid = FALSE,
+    xaxt = "n",
+    yaxt = "n",
+    ylab = NA,
+    xlab = NA
+  )
+)
+ground_truth_diff_abun_plot
+```
+
+### The true ROI, shared by both conditions
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
+oracle_segmentation_plot <- image(
+  m_context,
+  "circle_2",
+  layout = c(2, 1),
+  scale = TRUE,
+  superpose = FALSE,
+  key = FALSE,
+  grid = FALSE,
+  xaxt = "n",
+  yaxt = "n",
+  ylab = NA,
+  xlab = NA
+)
+save_cardinal_plot(
+  "Figure-ROI-Simulation-1-Segmentation-Oracle.png",
+  image(
+    m_context,
+    "circle_2",
+    layout = c(2, 1),
+    scale = TRUE,
+    superpose = FALSE,
+    key = FALSE,
+    grid = FALSE,
+    xaxt = "n",
+    yaxt = "n",
+    ylab = NA,
+    xlab = NA
+  )
+)
+oracle_segmentation_plot
+```
+
+### Example of ROIs defined by SSC
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
+m_ssc_context <- cbind(
+  results_list[[2]][[which(results_list[[3]]$id == control_sample_id)]],
+  results_list[[2]][[which(results_list[[3]]$id == trt_sample_id)]]
+)
+
+ssc_segmentation_plot <- image(
+  m_ssc_context,
+  "roi_ssc",
+  layout = c(2, 1),
+  scale = TRUE,
+  superpose = FALSE,
+  key = FALSE,
+  grid = FALSE,
+  xaxt = "n",
+  yaxt = "n",
+  ylab = NA,
+  xlab = NA
+)
+save_cardinal_plot(
+  "Figure-ROI-Simulation-1-Segmentation-SSC.png",
+  image(
+    m_ssc_context,
+    "roi_ssc",
+    layout = c(2, 1),
+    scale = TRUE,
+    superpose = FALSE,
+    key = FALSE,
+    grid = FALSE,
+    xaxt = "n",
+    yaxt = "n",
+    ylab = NA,
+    xlab = NA
+  )
+)
+ssc_segmentation_plot
+```
+
+### Example of ROIs defined by SKM
+
+```{r, fig.width=6, fig.height=12, message=FALSE, warning=FALSE}
+m_skm_context <- cbind(
+  results_list_skm_7c[[2]][[which(results_list_skm_7c[[3]]$id == control_sample_id)]],
+  results_list_skm_7c[[2]][[which(results_list_skm_7c[[3]]$id == trt_sample_id)]]
+)
+
+skm_segmentation_plot <- image(
+  m_skm_context,
+  "roi_skm",
+  layout = c(2, 1),
+  scale = TRUE,
+  superpose = FALSE,
+  key = FALSE,
+  grid = FALSE,
+  xaxt = "n",
+  yaxt = "n",
+  ylab = NA,
+  xlab = NA
+)
+save_cardinal_plot(
+  "Figure-ROI-Simulation-1-Segmentation-SKM.png",
+  image(
+    m_skm_context,
+    "roi_skm",
+    layout = c(2, 1),
+    scale = TRUE,
+    superpose = FALSE,
+    key = FALSE,
+    grid = FALSE,
+    xaxt = "n",
+    yaxt = "n",
+    ylab = NA,
+    xlab = NA
+  )
+)
+skm_segmentation_plot
+```
+
+# Do the same features drive segmentation across samples?
+
+Multivariate segmentation methods, such as SSC and SKM, seek to explain variation between features using spatial segments. Biological structures often explain substantial variation within MSI samples; thus, we might assume that the features that drive the results of the segmentation algorithms are also shared across samples.
+
+That assumption, at least within the bounds of our simulation, is incorrect. Below we generate Venn diagrams showing the overlap of different feature sets with the features driving segmentation.
+
+### Do the ROI-defining features drive SSC segmentation?
+
+The ROI-defining features (the first 100) are common to all the simulated images and clearly delineate the donut-shaped ROI. However, for images from both conditions, the ROI-defining features do not substantially drive ROI segmentation.
+
+
+```{r overlap-diagnostics, fig.width=8, fig.height=8, results='hide', message=FALSE, warning=FALSE}
+library(VennDiagram)
+library(RColorBrewer)
+
+ssc_control_charting_sample <- sscl[[which(samples$id == control_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == control_sample_id)]]$ssc_index]]
+ssc_trt_charting_sample <- sscl[[which(samples$id == trt_sample_id)]][[results_list[[1]][[which(results_list[[3]]$id == trt_sample_id)]]$ssc_index]]
+
+ssc_venn_roidiff_args <- list(
+  x = list(topFeatures(ssc_control_charting_sample, n = 100)$i,
+           topFeatures(ssc_trt_charting_sample, n = 100)$i,
+           1:100),
+  category.names = c("Top 100 Features\nfrom a control (Cond B) image",
+                     "Top 100 Features\nfrom a treatment (Cond A) image",
+                     "True 100 ROI-defining features"),
+  disable.logging = TRUE,
+  imagetype = "png",
+  height = 1000,
+  width = 1000,
+  resolution = 300,
+  compression = "lzw",
+  pointsize = 18,
+  lwd = 2,
+  lty = "blank",
+  fill = brewer.pal(3, "Pastel2"),
+  euler.d = TRUE,
+  sep.dist = 2,
+  fontfamily = "sans",
+  cat.cex = 0.6,
+  cat.fontfamily = "sans",
+  margin = 0.1
+)
+
+ssc_venn_roidiff_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SSC-Venn-ROI-Def-Shared-Features.png")
+do.call(
+  venn.diagram,
+  c(
+    ssc_venn_roidiff_args,
+    list(
+      filename = ssc_venn_roidiff_file,
+      output = TRUE
+    )
+  )
+)
+```
+
+```{r , fig.width=8, fig.height=8, echo = FALSE}
+knitr::include_graphics(ssc_venn_roidiff_file)
+```
+
+The same, but for SKM.
+
+```{r, fig.width=8, fig.height=8, results='hide', message=FALSE, warning=FALSE}
+
+skm_control_charting_sample <- skml_7c[[which(samples$id == control_sample_id)]]
+skm_trt_charting_sample <- skml_7c[[which(samples$id == trt_sample_id)]]
+
+
+skm_venn_roidef_args <- list(
+  x = list(topFeatures(skm_control_charting_sample, n = 100)$i,
+           topFeatures(skm_trt_charting_sample, n = 100)$i,
+           1:100),
+  category.names = c("Top 100 Features\nfrom a control (cond B) image",
+                     "Top 100 Features\nfrom a treatment (cond A) image",
+                     "True differentiating features"),
+  disable.logging = TRUE,
+  imagetype = "png",
+  height = 1000,
+  width = 1000,
+  resolution = 300,
+  compression = "lzw",
+  pointsize = 18,
+  lwd = 2,
+  lty = "blank",
+  fill = brewer.pal(3, "Pastel2"),
+  euler.d = TRUE,
+  sep.dist = 2,
+  fontfamily = "sans",
+  cat.cex = 0.6,
+  cat.fontfamily = "sans",
+  margin = 0.1
+)
+
+skm_venn_roidef_file <- file.path("Recreated-Figures", "Figure-ROI-Simulation-1-SKM-Venn-ROI-Def-Shared-Features.png")
+do.call(
+  venn.diagram,
+  c(
+    skm_venn_roidef_args,
+    list(
+      filename = skm_venn_roidef_file,
+      output = TRUE
+    )
+  )
+)
+```
+
+```{r , fig.width=8, fig.height=8, echo = FALSE}
+knitr::include_graphics(skm_venn_roidef_file)
+```
+
+
+# Evaluate true and false findings
+
+Visual evaluations of the ROIs defined by SSC and SKM clearly indicate these methods perform poorly in this context: many features, some of which define homogeneous ROIs consistently, some of which vary by condition, and all of which experience spatially correlated noise.
+
+We could conclude here, safe in the knowledge that because they have been drawn poorly, the downstream testing for differential abundance will yield poor results. However, the effects of multivariate segmentation are not relegated solely to poor clustering. Fundamentally, we are using the same numeric values (intensity values of pixels for each feature) to draw ROIs in each sample and then, after summarizing intensities within each ROI, to model and test for differential abundance between conditions. This reuse of information is called data leakage, but is better understood as confounding or selection bias in this specific scenario.
+
+Let's think through why, and how it will affect the results of statistical testing. The purpose of SKM and SSC is to explain variation in feature intensity by creating clusters of pixels that are similar across features. Let's pretend we have a set of MSI samples that only have a single feature. When we segment them with our algorithms, we set a number of clusters. High-intensity pixels are in one segment and low-intensity pixels in another, with other clusters in the middle and drawn with some awareness of how close the pixels are together. Now let's say that the single variable, condition, systematically decreases abundance in diseased samples (or increases it; the thought experiment works the same way, just flipped). How will that affect segmentation? Depending on the algorithm, the high-intensity cluster may have fewer pixels but the same mean. Or it may have the same pixels, meaning that the means of the other clusters will change as well. It may segment new or different patterns than before.
+
+If the goal of our analysis is to explore the morphological changes between samples, then the differences in ROI presentation between conditions are somewhat informative. But if we are trying to compare differential abundance using that single feature, we have now confounded our results. The segmentation with the single feature now becomes a selection bias we have applied to the sample of pixels we are trying to model. Its behavior is now erratic: it could overfit to noise, absorb true signal (as is the case in this simulation), or do nothing. Regardless, we do not know, and thus the error rates of our test (false positive, false negative) are no longer reliable.
+
+In reality, we have many features; thus, the impact of any individual feature on ROI boundaries is minimal. But with all of our features comes tremendous spatial noise, further obfuscating the true ROI, and in cases where spatial noise is shared between features, as is partially the case here, increasing the risk of overfitting to that noise.
+
+Let us explore this below. First, we will conduct t-tests on mean abundance in ROIs between conditions, correcting for multiple testing using the FDR. Then we will compute the error rates.
+
+```{r accuracy-summaries}
+res_labels <- tibble(
+  isPos = c(TRUE, FALSE, TRUE, FALSE),
+  truePos = c(TRUE, FALSE, FALSE, TRUE),
+  label = c("True Positive", "True Negative", "False Positive", "False Negative")
+)
+
+accuracy_frame_ssc <- run_models_to_test_ssc_roi[[2]] |>
+  mutate(
+    isPos = p.adjust(p.value_condition1, method = "fdr") < 0.05,
+    truePos = feature_id > 2500
+  ) |>
+  group_by(isPos, truePos) |>
+  count() |>
+  ungroup() |>
+  full_join(res_labels, by = join_by(isPos, truePos)) |>
+  mutate(n = replace_na(n, 0))
+
+accuracy_frame_oracle <- run_models_to_test_oracle_roi[[2]] |>
+  mutate(
+    isPos = p.adjust(p.value_condition1, method = "fdr") < 0.05,
+    truePos = feature_id > 2500
+  ) |>
+  group_by(isPos, truePos) |>
+  count() |>
+  ungroup() |>
+  full_join(res_labels, by = join_by(isPos, truePos)) |>
+  mutate(n = replace_na(n, 0))
+
+accuracy_frame_skm <- run_models_to_test_skm_roi_7c[[2]] |>
+  mutate(
+    isPos = p.adjust(p.value_condition1, method = "fdr") < 0.05,
+    truePos = feature_id > 2500
+  ) |>
+  group_by(isPos, truePos) |>
+  count() |>
+  ungroup() |>
+  full_join(res_labels, by = join_by(isPos, truePos)) |>
+  mutate(n = replace_na(n, 0))
+
+accuracy_frame_ssc
+accuracy_frame_oracle
+accuracy_frame_skm
+```
+
+As we can see, tests for differential abundance between ROIs segmented with SSC and SKM are much less sensitive.
+
+
+# Volcano-style comparison across methods
+
+Let's visualize the volcano plots to get a sense of the performance. 
+
+```{r volcano-comparison, fig.width=10, fig.height=6}
+bind_rows(
+  run_models_to_test_oracle_roi[[2]] |>
+    mutate(
+      fdr.p.value_condition1 = p.adjust(p.value_condition1, method = "fdr"),
+      isPosAdj = fdr.p.value_condition1 < 0.05,
+      truePos = feature_id > 2500,
+      id = "oracle"
+    ),
+  run_models_to_test_ssc_roi[[2]] |>
+    mutate(
+      fdr.p.value_condition1 = p.adjust(p.value_condition1, method = "fdr"),
+      isPosAdj = fdr.p.value_condition1 < 0.05,
+      truePos = feature_id > 2500,
+      id = "ssc"
+    ),
+  run_models_to_test_skm_roi_7c[[2]] |>
+    mutate(
+      fdr.p.value_condition1 = p.adjust(p.value_condition1, method = "fdr"),
+      isPosAdj = fdr.p.value_condition1 < 0.05,
+      truePos = feature_id > 2500,
+      id = "skm"
+    )
+) |>
+  mutate(
+    fdr_finding = ifelse(isPosAdj,
+                         ifelse(truePos, "True Positive", "False Positive"),
+                         ifelse(truePos, "False Negative", "True Negative")),
+    fdr_finding_pos_only = factor(
+      ifelse(isPosAdj,
+             ifelse(truePos, "True Positive", "False Positive"),
+             "True/False Negative"),
+      levels = c("True Positive", "False Positive", "True/False Negative")
+    ),
+    id = factor(id, levels = c("oracle", "ssc", "skm"), labels = c("Segmentation with single\nknown informative marker", "Segmentation with Spatial\nShrunken Centroids", "Segmentation with Spatial K Means"))
+  ) |>
+  ggplot(aes(x = estimate_condition1, y = -log(fdr.p.value_condition1), color = fdr_finding_pos_only)) +
+  geom_point(alpha = 0.65) +
+  facet_grid(. ~ id) +
+  scale_color_manual(
+    values = c(
+      "False Positive" = "#E1BE6A",
+      "True Positive" = "#40B0A6",
+      "True/False Negative" = "grey70"
+    ),
+    breaks = c("False Positive", "True Positive")
+  ) +
+  labs(
+    x = "Estimated difference of simulated condition means in ROI",
+    y = "-Log(FDR Adjusted P Value)",
+    color = "Finding"
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+
+ggsave(file.path("Recreated-Figures","SI-Figure-Simualtion-1-ROI-Volcano-Plots.png"), height = 5, width = 8, units = "in")
+```
