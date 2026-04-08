@@ -1,10 +1,10 @@
 # MSI Arthritis Vignettes
 
-This repository contains a set of analysis vignettes accompanying the preprint *Statistical Principles Define an Open-Source Differential Analysis Workflow for Mass Spectrometry Imaging Experiments with Complex Designs* by **Ethan B. T. Rogers**^1^, Sai Srikanth Lakkimsetty^1^, Kylie Ariel Bemis^1^, Charles A. Schurman^2^, Peggi M. Angel^3^, Birgit Schilling^2^, and Olga Vitek^1^. The preprint is available on bioRxiv (doi)[]. This page will be updated as this work is peer reviewed and accepted for publication.
+This repository contains a set of analysis vignettes accompanying the preprint *Statistical Principles Define an Open-Source Differential Analysis Workflow for Mass Spectrometry Imaging Experiments with Complex Designs* by **Ethan B. T. Rogers**<sup>1</sup>, Sai Srikanth Lakkimsetty<sup>1</sup>, Kylie Ariel Bemis<sup>1</sup>, Charles A. Schurman<sup>2</sup>, Peggi M. Angel<sup>3</sup>, Birgit Schilling<sup>2</sup>, and Olga Vitek<sup>1</sup>. The preprint is available on bioRxiv (doi)[]. This page will be updated as this work is peer reviewed and accepted for publication.
 
-^1^ Khoury College of Computer Sciences, Northeastern University, Boston MA  
-^2^ Buck Institute for Research on Aging, Novato CA  
-^3^ Department of Pharmacology and Immunology, Medical University of South Carolina, Charleston SC
+<sup>1</sup> Khoury College of Computer Sciences, Northeastern University, Boston MA  
+<sup>2</sup> Buck Institute for Research on Aging, Novato CA  
+<sup>3</sup> Department of Pharmacology and Immunology, Medical University of South Carolina, Charleston SC
 
 ## Vignettes
 
