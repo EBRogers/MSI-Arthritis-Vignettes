@@ -4,29 +4,138 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>MSI Arthritis Vignettes</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: "Helvetica Neue", Helvetica, Arial, sans-serif;
+      font-size: 14px;
+      line-height: 1.42857143;
+      color: #333;
+      background-color: #fff;
+    }
+
+    .main-container {
+      max-width: 940px;
+      margin-left: auto;
+      margin-right: auto;
+      padding: 24px 20px 32px;
+    }
+
+    h1 {
+      font-size: 38px;
+      font-weight: 500;
+      line-height: 1.1;
+      margin: 0 0 18px;
+    }
+
+    h2 {
+      font-size: 30px;
+      font-weight: 500;
+      line-height: 1.1;
+      margin: 28px 0 12px;
+      border-bottom: 1px solid #eee;
+      padding-bottom: 8px;
+    }
+
+    p {
+      margin: 0 0 12px;
+    }
+
+    a {
+      color: #337ab7;
+      text-decoration: none;
+    }
+
+    a:hover,
+    a:focus {
+      color: #23527c;
+      text-decoration: underline;
+    }
+
+    .lede {
+      font-size: 15px;
+      margin-bottom: 14px;
+    }
+
+    .affiliations {
+      margin: 16px 0 10px;
+      color: #555;
+    }
+
+    .affiliations p {
+      margin-bottom: 6px;
+    }
+
+    .vignette-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+
+    .vignette-list li {
+      border-bottom: 1px solid #ddd;
+    }
+
+    .vignette-list li:last-child {
+      border-bottom: 0;
+    }
+
+    .vignette-list a {
+      display: block;
+      padding: 10px 14px;
+    }
+
+    .vignette-list a:hover,
+    .vignette-list a:focus {
+      text-decoration: none;
+      background: #f5f5f5;
+    }
+
+    code {
+      color: inherit;
+      background-color: rgba(0, 0, 0, 0.04);
+      padding: 1px 4px;
+      border-radius: 3px;
+    }
+  </style>
 </head>
 <body>
-  <h1>MSI Arthritis Vignettes</h1>
-  <p>
-    This repository contains a set of analysis vignettes accompanying the preprint <em>Statistical Principles Define an Open-Source Differential Analysis Workflow for Mass Spectrometry Imaging Experiments with Complex Designs</em> by <strong>Ethan B. T. Rogers</strong><sup>1</sup>, Sai Srikanth Lakkimsetty<sup>1</sup>, Kylie Ariel Bemis<sup>1</sup>, Charles A. Schurman<sup>2</sup>, Peggi M. Angel<sup>3</sup>, Birgit Schilling<sup>2</sup>, and Olga Vitek<sup>1</sup>. The preprint is available on bioRxiv (doi)[]. This page will be updated as this work is peer reviewed and accepted for publication.
-  </p>
+  <div class="container-fluid main-container">
+    <h1>MSI Arthritis Vignettes</h1>
 
-  <p><sup>1</sup> Khoury College of Computer Sciences, Northeastern University, Boston MA</p>
-  <p><sup>2</sup> Buck Institute for Research on Aging, Novato CA</p>
-  <p><sup>3</sup> Department of Pharmacology and Immunology, Medical University of South Carolina, Charleston SC</p>
+    <p class="lede">
+      This repository contains a set of analysis vignettes accompanying the preprint
+      <em>Statistical Principles Define an Open-Source Differential Analysis Workflow for Mass Spectrometry Imaging Experiments with Complex Designs</em>
+      by <strong>Ethan B. T. Rogers</strong><sup>1</sup>, Sai Srikanth Lakkimsetty<sup>1</sup>,
+      Kylie Ariel Bemis<sup>1</sup>, Charles A. Schurman<sup>2</sup>, Peggi M. Angel<sup>3</sup>,
+      Birgit Schilling<sup>2</sup>, and Olga Vitek<sup>1</sup>. The preprint is available on bioRxiv.
+      This page will be updated as this work is peer reviewed and accepted for publication.
+    </p>
 
-  <h2>Vignettes</h2>
-  <ul>
-    <li><a href="0-Setup.html">0-Setup</a></li>
-    <li><a href="1-Preprocessing.html">1-Preprocessing</a></li>
-    <li><a href="2-Filtering-Aggregation.html">2-Filtering-Aggregation</a></li>
-    <li><a href="3-Statistical-Modeling.html">3-Statistical-Modeling</a></li>
-    <li><a href="4-Statistical-Inference.html">4-Statistical-Inference</a></li>
-    <li><a href="5-Designing-Future-Experiments.html">5-Designing-Future-Experiments</a></li>
-    <li><a href="Simulation-1.html">Simulation-1</a></li>
-    <li><a href="Simulation-2.html">Simulation-2</a></li>
-  </ul>
+    <div class="affiliations">
+      <p><sup>1</sup> Khoury College of Computer Sciences, Northeastern University, Boston MA</p>
+      <p><sup>2</sup> Buck Institute for Research on Aging, Novato CA</p>
+      <p><sup>3</sup> Department of Pharmacology and Immunology, Medical University of South Carolina, Charleston SC</p>
+    </div>
 
-  <p>These links correspond to <code>.Rmd</code> vignette sources, available in this repository.</p>
+    <h2>Vignettes</h2>
+    <ul class="vignette-list">
+      <li><a href="0-Setup.html">0-Setup</a></li>
+      <li><a href="1-Preprocessing.html">1-Preprocessing</a></li>
+      <li><a href="2-Filtering-Aggregation.html">2-Filtering-Aggregation</a></li>
+      <li><a href="3-Statistical-Modeling.html">3-Statistical-Modeling</a></li>
+      <li><a href="4-Statistical-Inference.html">4-Statistical-Inference</a></li>
+      <li><a href="5-Designing-Future-Experiments.html">5-Designing-Future-Experiments</a></li>
+      <li><a href="Simulation-1.html">Simulation-1</a></li>
+      <li><a href="Simulation-2.html">Simulation-2</a></li>
+    </ul>
+
+    <p style="margin-top: 14px; color: #555;">
+      These links correspond to <code>.Rmd</code> vignette sources available in this repository.
+    </p>
+  </div>
 </body>
 </html>
