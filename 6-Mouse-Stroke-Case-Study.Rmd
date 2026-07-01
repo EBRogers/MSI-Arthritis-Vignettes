@@ -1,0 +1,417 @@
+---
+title: "6-Mouse-Stroke-Case-Study"
+author: "Ethan Rogers"
+date: "06/29/2026"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+local({
+  hook_output <- knitr::knit_hooks$get('output')
+  knitr::knit_hooks$set(output = function(x, options) {
+    if (!is.null(options$max.height)) options$attr.output <- c(
+      options$attr.output,
+      sprintf('style="max-height: %s;"', options$max.height)
+    )
+    hook_output(x, options)
+  })
+})
+```
+
+In this vignette we demonstrate the proposed workflow on a case study of mouse brain samples after photothrombotic stroke.
+
+# Step 0: Setup
+
+Please follow the directions in vignette `0-Setup.Rmd` to create the environment and directory trees.
+
+# Step 1: Preprocessing
+
+```{r}
+library(readr)
+library(dplyr)
+library(tibble)
+library(tidyr)
+library(Cardinal)
+
+source("Utilities.R")
+source("SpatialUtilities.R")
+
+# from wd
+data.path <- file.path("Mouse-Stroke-Data")
+raw.data.path <- file.path(data.path ,"Raw")
+preprocessing.data.path <- file.path(data.path ,"Preprocessing")
+recalib.data.path <- file.path(preprocessing.data.path,"Recalibrated")
+aligned.data.path <- file.path(preprocessing.data.path,"Aligned")
+
+outputs.path <- file.path("Outputs")
+```
+
+## Load metadata
+```{r}
+name_tibble <- read_csv(file.path(outputs.path, "mouse_stroke_metadata.csv"), show_col_types = FALSE)
+```
+
+## Loading data
+
+```{r}
+samp <- name_tibble |>
+    filter(!is.na(days) & !is.na(replicate))
+```
+
+```{r}
+msa.raw <- list()
+
+for (s in samp$filename) {
+    m <- readMSIData(file.path(raw.data.path, s))
+
+    # reorient brains to be vertical
+    crd <- coord(m)
+    if (max(crd$x) - min(crd$x) < max(crd$y) - min(crd$y)) {
+        coord(m)$x <- crd$y
+        coord(m)$y <- crd$x
+    }
+
+    # rename run to be sample short name
+    sn <- name_tibble |> 
+        filter(filename == s) |>
+        pull(short_name)
+
+    runNames(m) <- sn
+    msa.raw[[sn]] <- m
+}
+
+gc()
+```
+
+## Recalibration
+These data do not require baseline removal or smoothing.
+
+```{r}
+bp <- SnowfastParam(workers = 10L, force.GC = T)
+
+for (sn in samp$short_name[3:10]) {
+    print(paste("Starting", sn, "\n"))
+    est_ref_peaks <- msa.raw[[sn]] |>
+		estimateReferencePeaks(BPPARAM = bp)
+    msa.raw[[sn]] |>
+	    recalibrate(ref = est_ref_peaks, tolerance = 10, units = "ppm") |>
+        process(BPPARAM = bp) |>
+        writeMSIDataSafe(file.path(recalib.data.path, paste0(sn, ".imzML")))
+}
+
+gc()
+```
+
+# Peak alignment from known peak list and IS C13 lipids
+
+```{r}
+lcms.peaks <- read_csv(file.path(outputs.path, 
+                    "LCMSlipids_brain_wang_et_al_nature_metab_2025.csv"),
+                    show_col_types = FALSE)
+
+#for normalization
+c13.is.lipids <- c(428.299845, 499.355465, 596.372775, 708.589835, 777.629855, 785.6367, 800.6476, 876.662865)
+
+all.peaks.to.align <- sort(c(c13.is.lipids, lcms.peaks$`Input Mass`))
+```
+
+```{r}
+bp <- SnowfastParam(workers = 8L, force.GC = T)
+
+# load, align, save
+for (sn in samp$short_name) {
+    readMSIData(file.path(recalib.data.path, paste0(sn, ".imzML"))) |>
+    peakAlign(ref = all.peaks.to.align) |>
+    process(BPPARAM = bp) |>
+    writeMSIDataSafe(file.path(aligned.data.path, paste0(sn, ".imzML")))
+}
+gc()
+```
+
+```{r}
+ind.c13.is.lipids <- features(readMSIData(file.path(aligned.data.path, paste0(samp$short_name[1], ".imzML"))),
+                                mz = c13.is.lipids)
+```
+
+```{r}
+# keep the original 146 lipids
+
+mse_list <- lapply(samp$short_name, function(short_name){
+    m <- readMSIData(file.path(aligned.data.path, paste0(short_name,".imzML")))
+    m$x <- m$x - min(m$x) + 1
+    m$y <- m$y - min(m$y) + 1
+    m
+})
+
+mse <- Reduce(cbind, mse_list)
+
+writeMSIDataSafe(mse, file.path(preprocessing.data.path, "Analytes-IS-Aligned.imzML"))
+```
+
+```{r}
+# keep the original 146 lipids
+
+mse_list <- lapply(samp$short_name, function(short_name){
+    m <- readMSIData(file.path(aligned.data.path, paste0(short_name,".imzML"))) |>
+    subsetFeatures(!(1:length(all.peaks.to.align) %in% ind.c13.is.lipids)) |>
+    summarizePixels(stat = c("nnzero", "mean", "sd"), na.rm = T, chunkopts = list(nchunks = 1))
+    m$x <- m$x - min(m$x) + 1
+    m$y <- m$y - min(m$y) + 1
+    m
+})
+
+mse <- Reduce(cbind, mse_list)
+
+writeMSIDataSafe(mse, file.path(preprocessing.data.path, "Analytes-Aligned.imzML"))
+```
+
+```{r}
+# keep the 8 IS lipids
+
+mse_list.is <- lapply(samp$short_name, function(short_name){
+    m <- readMSIData(file.path(aligned.data.path, paste0(short_name,".imzML"))) |>
+    subsetFeatures(1:length(all.peaks.to.align) %in% ind.c13.is.lipids) |>
+    summarizePixels(stat = c("nnzero", "mean", "sd"), na.rm = T, chunkopts = list(nchunks = 1))
+    m$x <- m$x - min(m$x) + 1
+    m$y <- m$y - min(m$y) + 1
+    m
+})
+
+mse.is <- Reduce(cbind, mse_list.is)
+
+writeMSIDataSafe(mse.is, file.path(preprocessing.data.path, "IS-Aligned.imzML"))
+```
+
+
+## ROI selection
+
+### Trim background 
+
+```{r}
+intensity(mse) <- as.matrix(intensity(mse))
+
+mse <- mse |> add_edge_factor_mse(radius = 10,  contiguous = FALSE)
+
+mse_subset <- mse |> 
+                subsetPixels(((edge == F & nnzero > 78) | (edge == T & nnzero > 88)))
+
+islands_drop_mask <- drop_pixel_islands_mask_mse(mse_subset, n = 20)
+
+mse_subset_trim_islands <- mse_subset |> subsetPixels(islands_drop_mask)
+
+key <- function(d) paste(d$run, d$x, d$y, sep = "\r")
+
+tissue_mask <- key(pData(mse)) %in% key(pData(mse_subset_trim_islands))
+```
+
+```{r}
+#for (i in 1:146) {
+#    image_png(mse_subset_trim_islands, i = i, style = "dark", bg = "black", key = F, grid = F, layout = c(5, 2), filename = paste("tmp/feature_", i, ".png"),
+#          width = 1500, height = 2200, pointsize = 24)
+#}
+```
+
+### Merge annotations from QuPath
+
+We used 834.5273 m/z (PS 40:6) to segment stroke from non-stroke area as it was previously [identified as a marker of white matter](https://doi.org/10.1038/s41598-018-37612-5) in a mouse stroke model.
+
+```{r}
+annot.qp <- read_csv(file.path(outputs.path, 
+                    "stroke-hemisphere-annotations-qupath.csv"),
+                    show_col_types = FALSE)
+```
+
+```{r}
+# verify order (all should be true)
+all(pData(mse_subset_trim_islands)$x == annot.qp$x)
+all(pData(mse_subset_trim_islands)$y == annot.qp$y)
+all(pData(mse_subset_trim_islands)$run == annot.qp$run)
+
+pData(mse_subset_trim_islands)$stroke <- annot.qp$stroke
+pData(mse_subset_trim_islands)$hemisphere <- annot.qp$hemisphere
+```
+
+```{r}
+image(mse_subset_trim_islands, "stroke")
+image(mse_subset_trim_islands, "hemisphere")
+```
+
+### Trim areas with very high internal standard lipid after tissue mask
+
+```{r}
+intensity(mse.is) <- as.matrix(intensity(mse.is))
+
+mse.is.tmp <- mse.is |>
+    subsetPixels(tissue_mask) |>
+    summarizeFeatures(stat = c("nnzero", "sd", "mean"), na.rm = T) |>
+    subsetFeatures(mean > 200) |>
+    summarizePixels(stat = c("nnzero", "sd", "mean"), na.rm = T)
+
+hist(mse.is.tmp$mean)
+
+quantile(mse.is.tmp$mean, p = .99)
+
+is.mask <- mse.is.tmp$mean < quantile(mse.is.tmp$mean, p = .99)
+```
+
+```{r}
+image_png(mse.is |> subsetPixels(tissue_mask) , subset = is.mask, i = c(1,4,5,7,8), layout = c(5, 10), key = F, grid = F, style = "dark", bg = "black", filename = "is.lipids.ltp99.png", width = 10000, height = 6000, pointsize = 24)
+```
+
+```{r}
+mse.roi.trimmed <- mse_subset_trim_islands |> 
+    subsetPixels(is.mask)
+
+image(mse.roi.trimmed, "stroke")
+image(mse.roi.trimmed, "hemisphere")
+
+writeMSIDataSafe(mse.roi.trimmed, file.path(preprocessing.data.path, "Aligned-Tissue-ROIs.imzML"))
+```
+
+
+```{r}
+mse.is.roi.trimmed <- mse.is |>
+    subsetPixels(tissue_mask) |>
+    subsetPixels(is.mask)
+
+writeMSIDataSafe(mse.is.roi.trimmed , file.path(preprocessing.data.path, "IS-Aligned-Tissue-ROIS.imzML"))
+```
+
+```{r}
+#final checks
+all(mse.roi.trimmed$run == mse.is.roi.trimmed$run)
+all(mse.roi.trimmed$x == mse.is.roi.trimmed$x)
+all(mse.roi.trimmed$y == mse.is.roi.trimmed$y)
+```
+
+
+## Normalization
+
+
+```{r}
+#keeping these high abundant IS lipids
+c13.is.lipids[c(1,4,5,7,8)]
+
+mse.all <- readMSIData(file.path(preprocessing.data.path, "Analytes-IS-Aligned.imzML"))
+
+intensity(mse.all) <- as.matrix(intensity(mse.all))
+
+mask <- key(pData(mse.all)) %in% key(pData(mse.roi.trimmed))
+
+mse.all.trimmed <- mse.all |>
+    subsetPixels(mask)
+
+mse.all.trimmed$stroke <- mse.roi.trimmed$stroke
+mse.all.trimmed$hemisphere <- mse.roi.trimmed$hemisphere
+
+# label features
+n.features <- nrow(fData(mse.all.trimmed))
+
+fData(mse.all.trimmed)$isIS <- 1:n.features %in% features(mse.all.trimmed, mz=c13.is.lipids)
+
+fData(mse.all.trimmed)$isMarker <- 1:n.features %in% features(mse.all.trimmed, mz=c(834.5273))
+```
+
+```{r}
+normalizeMultipleRefs <- function(object, refs, scale = 1, ...) {
+    if ( missing(refs) || is.null(refs) || length(refs) == 0L )
+        stop("must provide one or more reference values via 'refs'")
+    refs <- sort(unique(as.numeric(refs)))
+    FUN <- function(x, t, refs, scale = 1, ...) {
+        if ( any(refs < min(t)) || any(refs > max(t)) )
+            stop("one or more 'refs' is outside of domain limits")
+        i <- matter::bsearch(refs, t, nearest = TRUE)
+        b <- mean(x[i], na.rm = TRUE)
+        if ( !is.na(b) && b != 0 ) {
+            y <- scale * x / b
+        } else {
+            y <- rep.int(0, length(x))
+        }
+        dim(y) <- dim(x)
+        y
+    }
+    Cardinal::addProcessing(object, FUN,
+        label = "intensity normalization",
+        metadata = list(method = "multiref", refs = refs),
+        refs = refs, scale = scale, ...)
+}
+```
+
+```{r}
+#drop features before normalization
+prenormalized <- mse.all.trimmed |>
+    summarizeFeatures() |>
+    subsetFeatures(!isMarker & !(isIS & mean < 200)) 
+
+normalized <- prenormalized |>
+    normalizeMultipleRefs(mz(prenormalized)[fData(prenormalized)$isIS], scale = 1000) |>
+    process()
+
+```
+
+```{r}
+for (i in 1:length(mz(normalized))) {
+    image_png(normalized, i = i, style = "dark", bg = "black", key = F, grid = F, layout = c(5, 2), filename = paste("tmp/normalized/feature_", i, ".png"),
+          width = 1500, height = 2200, pointsize = 24)
+}
+```
+
+```{r}
+writeMSIDataSafe(mse_subset_trim_islands, file.path(preprocessing.data.path, "IS-normalized.imzML"))
+```
+
+
+# Step 2: Filtering and aggregation
+
+# Step 3: Statistical modeling
+
+```{r}
+
+normalized$day <- factor(sub("mouse-(\\d+)-\\d+", "\\1", normalized$run), levels = c(7, 28))
+
+normalized$rep<- as.factor(sub("mouse-\\d+-(\\d+)", "\\1", normalized$run))
+
+modeling.mse <- normalized |>
+    subsetPixels(stroke == TRUE)
+
+mt <- meansTest(modeling.mse, ~ day, samples = modeling.mse$run)
+ct <- contrastTest(mt, specs="day", 
+                      method="pairwise")
+
+topFeatures(ct) |> 
+    as_tibble() |>
+    ggplot(aes(x = `day28...day7.estimate`, y = -log(`day28...day7.fdr`))) +
+    geom_point(aes(color = `day28...day7.fdr` < 0.05), alpha = 0.5)
+
+vol <- NULL
+for (i in 1:length(mt)) {
+    td <- tidy(mt[[i]])
+    vol <- rbind(vol,
+        tibble(i = i, est.ref = td$estimate[1], est.eff = td$estimate[2], pct.delta = (td$estimate[1] - sum(td$estimate))/sum(td$estimate), p.value = td$p.value[[2]])
+    )
+}
+
+library(ggrepel)
+
+vol |> 
+mutate(fid = row_number(),
+        mz = round(mz(modeling.mse), 4)) |>
+left_join(lcms.peaks |> mutate(mz = round(`Input Mass`, 4))) |>
+mutate(fdr = p.adjust(p.value, method = "fdr")) |>
+ggplot(aes(x = pct.delta*100, y = -log(fdr))) +
+    geom_point(aes(color = fdr < 0.01), alpha = 0.5) +
+    geom_text_repel(
+        data = ~ slice_min(.x, fdr, n = 25, with_ties = FALSE),
+        aes(label = `LIPID MAPS`),
+        size = 3, max.overlaps = Inf
+    ) +
+    labs(x = "In stroke: 7 Days - 28 Days, percent difference from 7 days")
+
+```
+
+# Step 4: Statistical inference
+
+# Step 5: Designing future experiments

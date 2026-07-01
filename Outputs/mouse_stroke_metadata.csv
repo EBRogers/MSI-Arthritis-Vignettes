@@ -1,0 +1,16 @@
+path,filename,filename_no_ext,short_name,days,replicate,yeast_extracts,matrix_only,matrix_is,without_is
+Raw/20240628 Q-MSI_Brain Stroke_28 days_1.imzML,20240628 Q-MSI_Brain Stroke_28 days_1.imzML,20240628 Q-MSI_Brain Stroke_28 days_1,mouse-28-1,28,1,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_28 days_2.imzML,20240628 Q-MSI_Brain Stroke_28 days_2.imzML,20240628 Q-MSI_Brain Stroke_28 days_2,mouse-28-2,28,2,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_28 days_3.imzML,20240628 Q-MSI_Brain Stroke_28 days_3.imzML,20240628 Q-MSI_Brain Stroke_28 days_3,mouse-28-3,28,3,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_28 days_4.imzML,20240628 Q-MSI_Brain Stroke_28 days_4.imzML,20240628 Q-MSI_Brain Stroke_28 days_4,mouse-28-4,28,4,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_28 days_5.imzML,20240628 Q-MSI_Brain Stroke_28 days_5.imzML,20240628 Q-MSI_Brain Stroke_28 days_5,mouse-28-5,28,5,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_28 days_without IS.imzML,20240628 Q-MSI_Brain Stroke_28 days_without IS.imzML,20240628 Q-MSI_Brain Stroke_28 days_without IS,mouse-28-NA,28,NA,FALSE,FALSE,FALSE,TRUE
+Raw/20240628 Q-MSI_Brain Stroke_7 days_1.imzML,20240628 Q-MSI_Brain Stroke_7 days_1.imzML,20240628 Q-MSI_Brain Stroke_7 days_1,mouse-7-1,7,1,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_7 days_2.imzML,20240628 Q-MSI_Brain Stroke_7 days_2.imzML,20240628 Q-MSI_Brain Stroke_7 days_2,mouse-7-2,7,2,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_7 days_3.imzML,20240628 Q-MSI_Brain Stroke_7 days_3.imzML,20240628 Q-MSI_Brain Stroke_7 days_3,mouse-7-3,7,3,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_7 days_4.imzML,20240628 Q-MSI_Brain Stroke_7 days_4.imzML,20240628 Q-MSI_Brain Stroke_7 days_4,mouse-7-4,7,4,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_7 days_5.imzML,20240628 Q-MSI_Brain Stroke_7 days_5.imzML,20240628 Q-MSI_Brain Stroke_7 days_5,mouse-7-5,7,5,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_7 days_without IF.imzML,20240628 Q-MSI_Brain Stroke_7 days_without IF.imzML,20240628 Q-MSI_Brain Stroke_7 days_without IF,mouse-7-NA,7,NA,FALSE,FALSE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_matrix only.imzML,20240628 Q-MSI_Brain Stroke_matrix only.imzML,20240628 Q-MSI_Brain Stroke_matrix only,matrix_only,NA,NA,FALSE,TRUE,FALSE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_matrix+IS.imzML,20240628 Q-MSI_Brain Stroke_matrix+IS.imzML,20240628 Q-MSI_Brain Stroke_matrix+IS,mouse-NA-NA,NA,NA,FALSE,FALSE,TRUE,FALSE
+Raw/20240628 Q-MSI_Brain Stroke_yeast extracts.imzML,20240628 Q-MSI_Brain Stroke_yeast extracts.imzML,20240628 Q-MSI_Brain Stroke_yeast extracts,yeast_extracts,NA,NA,TRUE,FALSE,FALSE,FALSE

@@ -940,6 +940,14 @@ bg_idx <- features(m, mz=bg_mz_approx)
 m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx])
 ```
 
+```{r`}
+intensity(m) <- as.matrix(intensity(m))
+
+png(filename = "glufib_isos.png", width = 8000, height = 2000, bg = "black")
+image(m, i = bg_idx, grid = F, key = F, style= "dark", layout = c(6,16))
+dev.off()
+```
+
 ## A note on sparsity
 
 Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mix of concepts: zero intensity, intensity below the limit of detection, and missing values. Although each is subtly different, they are highly interlinked due to the nature of mass spectrometry. In practice, they behave similarly, but these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries towards zero, especially means. Missing values are often dropped, meaning that summaries are biased larger towards non-missing values. There is no good way around this predicament other than to reduce sparsity by defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
@@ -978,6 +986,20 @@ mse <- m |>
       na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
     summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
       na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
+
+```
+
+```{r}
+load(file.path("Outputs","roi_list.Rdata"))
+
+mse <- m |>
+        subsetPixels()
+        normalize(ref = 1570.6786) |>
+        process(BPPARAM=SnowfastParam(workers = 5L)) |>
+        summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
+          na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
+        summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
+          na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
 
 ```
 

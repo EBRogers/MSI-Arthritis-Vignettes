@@ -6,6 +6,7 @@
 /.vscode
 /renv
 /Data
+/Mouse-Stroke-Data
 /OLD
 /super_image*
 MSI_Arthritis_Vignettes.Rproj
@@ -31,3 +32,5 @@ renv.lock
 Arthritis-Project-Preprocessing-Code
 Simulation-Data
 s3_upload.sh
+/tmp
+/*.png
