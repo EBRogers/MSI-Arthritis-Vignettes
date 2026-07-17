@@ -34,3 +34,7 @@ Simulation-Data
 s3_upload.sh
 /tmp
 /*.png
+/QQ-Itx-SII-Plots*
+/Data/RawMagi
+metadata.toml
+/*-OLD

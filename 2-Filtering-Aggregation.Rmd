@@ -35,10 +35,6 @@ library(fuzzyjoin)
 library(Cardinal)
 source(file.path("Utilities.R"))
 
-zero_to_na <- function(x, mz) {
-  x[x == 0] <- NA_real_
-  x
-}
 
 setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
@@ -53,16 +49,10 @@ load(file.path("Outputs", "roi_list.Rdata"))
 
 ## Load peak-picked imzML files
 
-We will load the combined, normalized, peak-picked image. We will then replace zeros with NAs. The imzML format does not respect NA values, so Cardinal will read them as zeros when reloaded. We will also join the ROIs created in `1-Preprocessing`.
+We will load the combined, normalized, peak-picked image. The imzML format does not respect NA values, so Cardinal will read them as zeros when reloaded. We will also join the ROIs created in `1-Preprocessing`.
 
 ```{r load_imzML}
 mse <- readMSIData(COMBINED_DATA_PATH, verbose = F)
-
-mse <- mse |>
-      addProcessing(zero_to_na, label="zero_to_na_before_filtering") |>
-      process(spectra="intensity", index="mz", 
-                BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
-                verbose = F)
 
 pData(mse)$tissue_zone <- as.data.table(pData(mse)) |>
   left_join(roi_list, by = c("x","y","run")) |>
@@ -93,30 +83,24 @@ if (length(indices_of_ROI_segmentation_ions) >= 1) {
 
 We will be filtering by mean and standard deviation. We assume that noisy, non-informative features have low variation and low intensity. For simplicity, we will drop features where sample-wide mean intensity and standard deviation are both in the bottom 25th percentile in non-background pixels.
 
-First, we will drop background pixels.
-
-```{r ns_filt_compute_cardinal}
-mse_no_background <- subsetPixels(mse, tissue_zone!= "background")
-```
-
 Now we can compute the mean and standard deviation of each feature across all samples.
 
 ```{r}
-mse_no_background <- summarizeFeatures(mse_no_background,
-                                       stat = c("mean", "sd", "nnzero"),
-                                       na.rm = TRUE,
-                                       BPPARAM = SnowfastParam(workers = 12L, 
-                                                               force.GC = TRUE),
-                                       verbose = F)
+mse <- summarizeFeatures(mse,
+                        stat = c("mean", "sd", "nnzero"),
+                        na.rm = TRUE,
+                        BPPARAM = SnowfastParam(workers = 12L, 
+                                                force.GC = TRUE),
+                        verbose = F)
 
 ```
 
 Now we can identify features to drop.
 
 ```{r}
-mz_to_keep <- mz(subsetFeatures(mse_no_background,
-                                !(sd < quantile(sd, p = 0.25) & 
-                                  mean < quantile(mean, p = 0.25))))
+mz_to_keep <- mz(subsetFeatures(mse,
+                              !(sd < quantile(sd, p = 0.25) & 
+                                mean < quantile(mean, p = 0.25))))
  
 ```
 
@@ -149,120 +133,14 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 
 Clustering of related features is an active field of research with many implementations. Choosing a clustering algorithm should be done based on what you want to cluster (related molecules, spatial analogs, isotopes, adducts, precursors, etc.) and the methods to cluster (spatial similarity, kendrick mass defect, intensity ratios, etc.). As such, we treat feature clustering as an interchangeable step that takes in MSIs and returns meaningful feature clusters to the experiment.
 
-As of version 3.6, Cardinal does not offer feature clustering methods. In this work we have used DeepION ([ACS Paper](https://doi.org/10.1021/acs.analchem.3c05002), [Github](https://github.com/gankLei-X/DeepION)) to cluster isotopes. We have also explored mzClustering ([Bioinformatics Paper](https://doi.org/10.1093/bioinformatics/btad067), [Original Github](https://github.com/DanGuo1223/mzClustering), [Github of install-ready version, made possible by Nihira Golasangi](https://github.com/NihiraGolasangi/mzClustering-mass-spectrometry-imaging)). At the time of publication, these methods were experimentally tested but lacked easy-to-install implementations. mzClustering has been updated by Nihira Golasangi to be install-ready from Github. DeepION may require more work to reconcile package conflicts, especially if using Apple M series chipsets. Because these methods exist external to this workflow and are interchangeable with other clustering methodologies, we will prepare the input files for both methods and provide the output of DeepION for clustering.
+As of version 3.6, Cardinal does not offer feature clustering methods. In this work we tested DeepION to cluster isotopes and adducts ([ACS Paper](https://doi.org/10.1021/acs.analchem.3c05002), [Github](https://github.com/gankLei-X/DeepION)), and mzClustering to cluster related spatial analogs ([Bioinformatics Paper](https://doi.org/10.1093/bioinformatics/btad067), [Original Github](https://github.com/DanGuo1223/mzClustering), [Github of install-ready version, made possible by Nihira Golasangi](https://github.com/NihiraGolasangi/mzClustering-mass-spectrometry-imaging)). At the time of publication, these methods were experimentally tested but lacked easy-to-install implementations. mzClustering has been updated by Nihira Golasangi to be install-ready from Github. DeepION may require more work to reconcile package conflicts, especially if using Apple M series chipsets. Both methods use spatial similarity to cluster features. mzClustering creates groups of similar features, while DeepION tests similarity of possible isotopes, as determined by mass differences. 
 
-Both methods use spatial similarity to cluster features. mzClustering creates groups of similar features, while DeepION tests similarity of possible isotopes, as determined by mass differences. To adapt these methods to multi-tissue clustering, we must force the methods to cluster all the samples together. As all samples share the same m/z axis, we can achieve this by stitching together samples' intensity matrices. Both of these methods are computationally intensive, especially when used to cluster multiple tissue in unison. Additionally, these methods were designed to run on Nvidia GPUs (using CUDA) and must be adapted to run on Apple M series Metal GPU frameworks.
+Although powerful, we did not find the computational overhead of these methods to be feasible for most analyses. Additionally, neither is design for multi-sample datasets. We have instead opted to perform rudimentary clustering of C-13 isotopes using simpler methods, specifically by first identifying isotopic candidates with a known mass delta (with a mass error tolerance) then classifying candidates as isotopes by their ion image similarity. We will use pearson correlation of to assess spatial similarity and select the similary cutoff as the lowest correlation value yeilding minimal incorrect classification of random decoys pairs.
 
-## Prepare intensity matrices
-
-First, extract the intensity matrix of each sample, and bind their columns. Both algorithms take a matrix of features and pixels as input - mzClustering requires features $\times$ pixels while DeepION requires the transpose (pixels $\times$ features).
-
-```{r create_algo_matrix}
-k <- as.matrix(intensity(mse))
-```
-
-Each row of a `MSImagingExperiment` intensity matrix represents a feature, and each column a pixel. Matrix values are intensities. Keep in mind that `MSImagingExperiment` objects usually represent irregularly-shaped samples rastered into a coordinate system, and `Cardinal` only stores the intensities that are actual sample values. This presents an issue: both DeepION and mzClustering require rectangular images.
-
-We could use `sliceImage` to get 3D array of $x \times y \times n_{features}$ - a cube with rectangular slices (features), where the non-sample background of the rectangular slice is NAs - but it would make the images much larger (artificially, mostly NAs) and require more memory.
-
-Instead we will use the fact that, along with a 2D intensity matrix, DeepION and mzClustering take the dimensions of the image as a parameter. Using those dimensions, the algorithms extract the intensity vector of each feature (each row of the intensity matrix, a set of pixel intensities in the order of $P_{x=1,y=1}, P_{x=2,y=2}...P_{x=dim(x),y=dim(y)}$) and reshape the vector using the supplied dimensions. Therefore we shall zero pad the bound intensity arrays, such that each row can be reshaped into a square image. This will disrupt the spatial relationship between pixels - when reshaping each feature image, the new dimensions will be different from the original *and* there are no sample background pixels - but the spatial relationships *between* features will be preserved.
-
-```{r create_algo_matrix_zero_pad}
-# start with the length (# of columns) of the bound intensity matrix
-len <- dim(k)[2]
-# find the nearest square
-new_col <- ceiling(sqrt(len))^2
-# find the how many more columns you have to add to get to that square
-delta <- new_col - len
-# tack on a matrix of 0's to make the square root of the total number of columns the next integer
-new_k <- cbind(k, matrix(0, nrow = nrow(k), ncol = delta))
-```
-
-In a twist of irony, DeepION and mzClustering cannot handle NA values. As MSIs experience intensity dependent missingness we will zero-fill NA values.
-
-```{r create_algo_matrix_na_zero_fill}
-new_k <- replace(new_k, is.na(new_k), 0)
-new_k <- as.data.frame(new_k)
-```
-
-## Write input files for the feature clustering algorithms
-
-The value below is the new dimension for the images.
-
-```{r create_algo_matrix_get_new_dim}
-new_dimension <- ceiling(sqrt(len))
-print(paste("Square Image Dimension:",new_dimension))
-```
-
-Write the intensity matrices for the algorithms. Both algorithms take the file name as arguments. DeepION also requires a vector of m/z values to compute possible isotope candidates. This will take a second as these files are large.
-
-```{r create_algo_matrix_write}
-write.table(new_k,
-            file=file.path("Outputs",paste0("super_image_",new_dimension,"_for_mzClustering.txt")),
-            row.names = F,
-            col.names = F)
-
-write.table(t(new_k),
-            file=file.path("Outputs",paste0("super_image_",new_dimension,"_for_DeepION.txt")),
-            row.names = F,
-            col.names = F)
-
-# for DeepION algo (needs the image matrix transposed and a vector of the MZ values)
-write.table(mz(mse),
-            file=file.path("Outputs","mz_vector_for_DeepION.txt"),
-            row.names = F,
-            col.names = F)
-
-
-# garbage collect these so they aren't taking up valuable memory
-rm(k, new_k)
-```
 
 # Feature aggregation
 
-## Read and preprocess DeepION clustering outputs
-
-We have supplied the clustering output of DeepION for a specific stitched-image dimension. Each row in DeepION's output represents an isotope grouping. This process works for any clustering schema (not unique to DeepION) that produces outputs similar to DeepION, though it may require some adaptation.
-
-```{r read_deepion_output}
-mse <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered.imzML")) |>
-      addProcessing(zero_to_na, label="zero_to_na_before_filtering") |>
-      process(spectra="intensity", index="mz", 
-                BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
-                verbose = F)
-
-deepion_iso_output_file <- file.path("Outputs", "output_super_image_708.txt")
-iso <- readr::read_csv(deepion_iso_output_file, show_col_types = F) |>
-  mutate(group_id = row_number())
-knitr::kable(head(iso))
-```
-
-Reshape so that each row is a feature.
-
-```{r reshape_deepion_output}
-iso <- iso |>
-  pivot_longer(monoisotope : isotope_2, 
-               names_to = "isotope", 
-               names_prefix = "isotope_", 
-               values_to = "mz") |>
-  filter(mz > 0) |>
-  dplyr::select(mz, group_id)
-knitr::kable(head(iso))
-```
-
-Unfortunately DeepION does not preserve all decimal points of the original m/z values. We will need to do a fuzzy merge to get the original values for Cardinal.
-
-```{r fuzzyjoin_deepion_output}
-iso_merged <- iso |>
-  difference_right_join(tibble(mz = as.numeric(mz(mse)), 
-                              feature_id = 1:nrow(fData(mse))),
-                       by = 'mz',
-                       max_dist = 0.0001,
-                       distance_col = "mz_delta") |>
-  dplyr::select(group_id, feature_id, `mz.y`) |>
-  dplyr::rename("mz" = `mz.y` )
-knitr::kable(head(iso_merged))
-```
+Isotopes are not expected to have the same abundance but are usually biologically identical. Unless experimental design requires the use of isotopes, such as experiments with C-13 labeling for quanitfication, isotopes can be aggregated without loosing any information. We will aggregate isotopes by selecting a representive ion and dropping the rest. For spatial analogs expected to be homogenous, other aggregation strategies like averaging may be more appropriate.
 
 ## Aggregate feature clusters by selecting representative features with the highest mean intensity
 

@@ -34,7 +34,7 @@ source(file.path("Utilities.R"))
 
 RNGkind("L'Ecuyer-CMRG")
 
-setCardinalVerbose(verbose = FALSE)
+#setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
 ```
 
@@ -131,57 +131,28 @@ Before recalibration, `mse` holds metadata in memory and its intensity matrix ou
 
 Peak picking is the process of selecting informative peaks for later analysis. For multi-sample experiments, peak picking must yield feature sets with a shared mass spectrum. We will begin with smoothing and baseline reduction. Not all datasets require these steps. Smoothing can help denoise outlier pixels. Baseline reduction corrects baseline increases that often happen at small mass ranges.
 
-We will perform smoothing and baseline recalibration individually on each sample, using parallel processing to speed up processing on each sample.
-```{r peak-picking-params, warning=FALSE, message=FALSE, }
-calibrant_mz <- sort(c(1570.6896, 843.39, 1019.50, 1211.58, 1552, 2097))
-invisible(gc())
-for (n in names(mse_list_raw)) {
-  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," BLR + SMOOTH\n")
-  m <- mse_list_raw[[n]]|> 
-                smooth(method = "gaussian", width = 8, sd = 2) |>
-                reduceBaseline(method = "median") |>
-                process(BPPARAM=SnowfastParam(workers = 10, force.GC = T))
-  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," WRITE\n")  
-  writeMSIDataSafe(m,
-              file.path("Data",
-                        "Preprocessing",
-                        "Smoothed-BLR", 
-                        paste0(runNames(m), ".imzML")),
-              BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
-  rm(m)
-  invisible(gc())
-}
-```
-
-Reload smoothed and baseline-reduced intermediates so they are out of memory.
-
-```{r}
-DATA_PATH <- file.path("Data","Preprocessing","Smoothed-BLR")
-MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
-                            recursive = TRUE)
-
-mse_list_smooth = list()
-for (f in MSE_FILENAMES) {
-  m <- readMSIData(file.path(DATA_PATH, f),verbose=F) 
-  mse_list_smooth[[runNames(m)]] <- m
-}
-```
-
 Peak recalibration aligns spectra to a shared reference. We will perform this step twice - the first time with a set of estimated, sample-specific reference peaks, and the second time with a set of predefined reference peaks shared across all samples. The intention is for the first recalibration to align spectra within a sample, and the second for aligning samples to each other.
 
 Recalibration is the most computational and memory intensive step in preprocessing. It may take a long time, and may consume all of your device's memory. Adjust parallel processing parameters as necessary. 
 
 ```{r}
-for (n in names(mse_list_smooth)){
-  m <- mse_list_smooth[[n]]
+calibrant_mz <- 1570.6896
+
+for (n in names(mse_list_raw)){
+  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," SMOOTHING\n")
+  m <- mse_list_raw[[n]] |>
+    smooth(method = "gaussian", width = 5, sd = 0.8) |>
+    reduceBaseline(method = "median") |>
+    process(BPPARAM=SnowfastParam(workers = 10L, force.GC = T))
+
   cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," ESTREFPEAKS\n")
   esti_ref_peaks <- estimateReferencePeaks(m, 
     BPPARAM = SnowfastParam(workers = 10L, force.GC = T))
 
   cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," RECALIBx2\n")
   m_recalib_picked <- m |> 
-              recalibrate(ref = esti_ref_peaks, tolerance = 80, units = "ppm") |> 
-              recalibrate(ref = calibrant_mz, tolerance = 80, units = "ppm") |>
+              recalibrate(ref = esti_ref_peaks, tolerance = 60, units = "ppm") |> 
+              recalibrate(ref = calibrant_mz, tolerance = 60, units = "ppm") |>
               process(BPPARAM=SnowfastParam(workers = 15L, force.GC = T))
   invisible(gc())
 
@@ -189,22 +160,21 @@ for (n in names(mse_list_smooth)){
   writeMSIDataSafe(m_recalib_picked,
               file.path("Data",
                         "Preprocessing",
-                        "Smoothed-BLR-Recalibrated", 
+                        "Recalibrated", 
                         paste0(runNames(m_recalib_picked), ".imzML")),
               BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
-  rm(m_recalib_picked)
+  rm(m_recalib_picked, m)
   invisible(gc())
 }
 
-rm(mse_list_smooth)
+rm(mse_list_raw)
 invisible(gc())
 ```
 
 As before, reload intermediates to be out of memory. 
 
 ```{r read-recalibrated}
-DATA_PATH_PICKED <- file.path("Data","Preprocessing",
-  "Smoothed-BLR-Recalibrated")
+DATA_PATH_PICKED <- file.path("Data","Preprocessing","Recalibrated")
 MSE_FILENAMES_PICKED <- list.files(DATA_PATH_PICKED, pattern = "\\.imzML$",
                             recursive = TRUE)
 
@@ -239,19 +209,24 @@ The final step, changing the `spectrumRepresentation`, ensures that Cardinal wri
 After these steps, the resulting combined image will have an orders-of-magnitude smaller memory footprint, as we are no longer maintaining separate mass axes for each spectrum and non-centroided peaks. The object should easily fit in memory.
 
 ```{r}
-mse_all <- combine(mse_list_rp) |>
-            peakPick(method="diff", SNR=5) |>
-            peakAlign(tolerance = 80, units = "ppm") |>
-            process(BPPARAM=SnowfastParam(workers = 10L, force.GC = T)) |> 
-            summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"),
-              na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
+mse_all_combo <- Reduce(combine, mse_list_rp)
 
-rm(mse_list_rp)
+mse_all_picked <- mse_all_combo |>
+            peakPick(method="diff", SNR=3) |>
+            process(BPPARAM=SnowfastParam(3L)) 
+            
+mse_all_aligned <- mse_all_picked |>
+            peakAlign(tolerance = 60, units = "ppm") |>
+            process(BPPARAM=SnowfastParam(3L))
+
+rm(mse_list_rp, mse_all_queued)
 invisible(gc())
+
+mse_all_aligned
 
 # This is likely unnecessary, but may prevent 
 # issues with older versions of Cardinal
-experimentData(mse_all)$spectrumRepresentation <- "centroid spectrum"
+experimentData(mse_all_aligned)$spectrumRepresentation <- "centroid spectrum"
 ```
 
 Cardinal automatically calculates `freq` during peak picking, but this metric is computed across all runs. In our workflow, we recommend filtering peaks by non-zero frequency on a per-run basis. The function below can do this.
@@ -289,11 +264,15 @@ filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
 Using the function defined above, filter peaks so that only peaks where `freq >= 0.05` in every run are retained.
 
 ```{r combine-align}
-mse_all_filt <- mse_all |> 
+mse_all_filt <- mse_all_aligned |> 
   filterFeaturesByRunFreq(0.05) |> 
   summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
-    na.rm = T,  BPPARAM=SnowfastParam(workers = 5L))
+    na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
+  summarizeFeatures(stat = c("nnzero", "mean", "sd"), 
+    na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
 invisible(gc())
+
+mse_all_filt
 ```
 
 Write the uniform, peak-picked image to disk.
@@ -302,7 +281,7 @@ Write the uniform, peak-picked image to disk.
 writeMSIDataSafe(mse_all_filt,
   file.path("Data", 
     "Preprocessing", 
-    "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
+    "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
 ```
 
 For other steps, it is useful to have each peak-picked image separate again.
@@ -324,8 +303,41 @@ Remove unnecessary objects from memory.
 #CLEAN UP
 rm(m, mse_all_filt, mse_all)
 invisible(gc())
+
+#REMOVE BEFORE FLIGHT
+knitr::knit_exit()
 ```
 
+
+```{r}
+
+mse_all_filt <- readMSIData(file.path("Data", 
+    "Preprocessing", 
+    "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
+
+intensity(mse_all_filt) <- as.matrix(intensity(mse_all_filt))
+
+manage_directory(file.path("tmp", "features"))
+
+for (i in 1:length(mz(mse_all_filt))) {
+  image_png(mse_all_filt, 
+  i = i, 
+  key = F, 
+  grid = F, 
+  style = "dark", 
+  bg = "black", 
+  width = 5000, 
+  height = 3100, 
+  filename = file.path("tmp", 
+    "features",
+    paste0("feature_", 
+        i, 
+        "_", 
+        round(mz(mse_all_filt)[i],3), 
+        ".png")))
+}
+
+```
 
 # ROI Segmentation
 
@@ -935,9 +947,11 @@ bg_mz_approx <- c(1570.6786,
                   1593.6739, 
                   1594.6766)
 
+bg_isos_mz_approx <- bg_mz_approx[2:6]
+
 bg_idx <- features(m, mz=bg_mz_approx) 
 
-m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx])
+bg_idx_isos <- features(m, mz=bg_isos_mz_approx) 
 ```
 
 ```{r`}
@@ -948,6 +962,11 @@ image(m, i = bg_idx, grid = F, key = F, style= "dark", layout = c(6,16))
 dev.off()
 ```
 
+```{r}
+
+m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx_isos])
+```
+
 ## A note on sparsity
 
 Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mix of concepts: zero intensity, intensity below the limit of detection, and missing values. Although each is subtly different, they are highly interlinked due to the nature of mass spectrometry. In practice, they behave similarly, but these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries towards zero, especially means. Missing values are often dropped, meaning that summaries are biased larger towards non-missing values. There is no good way around this predicament other than to reduce sparsity by defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
@@ -955,45 +974,15 @@ Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mi
 
 ## Preparing spectra for median normalization
 
-In our testing, we found median normalization was less biased by outliers than TIC normalization. The trade-off is that TIC normalization is *slightly* more robust to sparsity. Median normalization is simple: compute the median intensity of each m/z value for each pixel, then scale each m/z value of the pixel so that each median is the same. Although simple, this still presents issues. If the median of a spectrum is zero, then the scaled intensity becomes undefined. If we replace zeros with missing values, then recompute the median dropping missing values, the median will be biased larger. There is no easy answer. For this analysis, we chose to replace zeros with NA values, as leaving zeros in would result in zero-inflation of mean abundance at the time of statistical modeling. Zero inflation breaks the assumption that residual values are normally distributed.
+In our testing, we found reference had fewer downsides than global constant normalization methods like TIC normalization. TIC normalization assumes few ions are changign between samples. In studies of differential abundance between experimental groups with multiple samples, this assumption is unlikely to be correct. TIC assumes that the same amount of biological sample is being ionized in each pixel. This is also likely to be untrue due to both biology (ionization efficeny due to composition of different tissues) and experimental setup (pixels strattling the end of the sample may have less ionizationable material.) TIC normalization is highly sensitive to outliers. This can be mitgated by using median normalization instead, but median normalaiton can introduce other issues relating to sparsity (see above) when normalizaing features where the median is zero. Finally, on peak picked data with a skewed distributuon of peak intensities, TIC becomes a function of the most intense peaks. This issue, made worse by sparsity and outliers, enforces a strict spatial structure. Reference normalization also has issues. Normaliation is only possible on areas with detectable reference peaks, meaning the concentration and selection of the reference bears heavily on the normalization. References are representitve standards when they are similar to the analyes being measured. This makes references for heterogenous biomolecular classes liek metabolites unrepresentitive and unlikey to produce quality normalization. Finally, without ground truth availible, evalaution of these methods is diffcult. Normalization remains an active area of research. 
 
-Even still, we found that median normalization can be highly biased by outliers. True outliers are rare, but can be of very high magnitude. We chose to clip medians at the 95th percentile to control outliers. These steps are performed in the chunk below using matter's `addProcessing` function to queue steps for parallel processing.
-
-
-```{r apply-na}
-zero_to_na <- function(x, mz) {
-  x[x == 0] <- NA_real_
-  x
-}
-
-clip_95 <- function(vector_ints, mz) {
-    if (all(is.na(vector_ints))) {
-      vector_ints
-    } else {
-      thresh <- quantile(vector_ints, 0.95, na.rm = T) 
-      vector_ints |> 
-        pmin(thresh)
-    }
-}
-
-mse <- m |>
-    addProcessing(zero_to_na, label="zero_to_na_before_median_norm") |>
-    addProcessing(clip_95, label="clip_95percentile") |>
-    process(spectra="intensity", 
-            index="mz", 
-            BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE)) |>
-    summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
-      na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
-    summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
-      na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
-
-```
+We will start by only normalizing tissue areas.
 
 ```{r}
 load(file.path("Outputs","roi_list.Rdata"))
 
 mse <- m |>
-        subsetPixels()
+        subsetPixels(tissue_zone != "background") |>
         normalize(ref = 1570.6786) |>
         process(BPPARAM=SnowfastParam(workers = 5L)) |>
         summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
@@ -1001,63 +990,6 @@ mse <- m |>
         summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
           na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
 
-```
-
-We also compute the global median (the median of medians, across all spectra in all runs) to use as a final scaling constant. The final constant can be anything, so we chose this value to remain representative.
-
-```{r compute-median-by-pixel}
-pData(mse)$median <- Cardinal::spectrapply(
-    mse,
-    FUN = function(x) stats::median(x, na.rm = TRUE),
-    spectra = "intensity",
-    simplify = TRUE,
-    BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE)
-  )
-
-#sanity check
-min(pData(mse)$median[is.na(pData(mse)$median) == F])
-max(pData(mse)$median[is.na(pData(mse)$median) == F])
-
-grand_median <- median(
-  as.data.table(pData(mse))[, 
-    .(run_median = median(median, na.rm = TRUE)), 
-      by = run][, 
-        run_median]
-)
-```
-
-
-```{r define-normalize-with-median}
-scale_by_median <- function(x, mz, scaling_constant, na.rm = TRUE) {
-  med <- stats::median(x, na.rm = na.rm)
-
-  if (is.na(med)) {
-    warning("scale_by_median: median is NA; returning all NA for that spectrum")
-    return(rep(NA_real_, length(x)))
-  }
-  if (med == 0) {
-    stop("scale_by_median: median == 0 encountered")
-  }
-
-  (scaling_constant / med) * x
-}
-
-```
-
-We now apply normalization. Cardinal does not have a native implementation of median normalization, thus we created our own. As the data are centroided and peak picked, they easily fit in memory.
-
-```{r apply-normalization}
-normalized <- mse |>
-        addProcessing(scale_by_median, label="scale_by_median",
-                      scaling_constant=grand_median, na.rm=TRUE) |>
-        process(spectra="intensity", index="mz", 
-              BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE))
-
-normalized <- normalized |>
-  summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
-    na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
-  summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
-    na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
 ```
 
 Finally, save the normalized dataset.
@@ -1100,11 +1032,7 @@ load(file.path("Outputs", "roi_list_mvs.Rdata"))
 
 mse_norm <- readMSIData(file.path("Data",
                                         "Preprocessing",
-                                        "normalized.imzML")) |>
-      addProcessing(zero_to_na, label="zero_to_na_before_filtering") |>
-      process(spectra="intensity", index="mz", 
-                BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
-                verbose = F)
+                                        "normalized.imzML"))
 
 pData(mse_norm)$tissue_zone <- as.data.table(pData(mse_norm)) |>
   left_join(roi_list, by = c("x","y","run")) |>
