@@ -34,7 +34,7 @@ source(file.path("Utilities.R"))
 
 RNGkind("L'Ecuyer-CMRG")
 
-#setCardinalVerbose(verbose = FALSE)
+setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
 ```
 
@@ -51,8 +51,7 @@ MSE_FILENAMES <- list.files(DATA_PATH, pattern = "\\.imzML$",
 
 mse_list_raw = list()
 for (f in MSE_FILENAMES) {
-  just_fname <- isolate_filename(f)
-  agnostic_step_fname <- name_tibble |> 
+  agnostic_step_fname <- name_tibble |>
     filter(raw_filename == f) |> 
     pull(run)
   if (length(agnostic_step_fname) != 0){
@@ -220,7 +219,7 @@ mse_all_aligned <- mse_all_picked |>
             peakAlign(tolerance = 60, units = "ppm") |>
             process(BPPARAM=SnowfastParam(3L))
 
-rm(mse_list_rp, mse_all_queued)
+rm(mse_list_rp, mse_all_combo, mse_all_picked)
 invisible(gc())
 
 # This is likely unnecessary, but may prevent 
@@ -300,39 +299,8 @@ Remove unnecessary objects from memory.
 
 ```{r plot-mean-and-cleanup}
 #CLEAN UP
-rm(m, mse_all_filt, mse_all)
+rm(m, mse_all_filt, mse_all_aligned)
 invisible(gc())
-```
-
-
-```{r}
-
-mse_all_filt <- readMSIData(file.path("Data", 
-    "Preprocessing", 
-    "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
-
-intensity(mse_all_filt) <- as.matrix(intensity(mse_all_filt))
-
-manage_directory(file.path("tmp", "features"))
-
-for (i in 1:length(mz(mse_all_filt))) {
-  image_png(mse_all_filt, 
-  i = i, 
-  key = F, 
-  grid = F, 
-  style = "dark", 
-  bg = "black", 
-  width = 5000, 
-  height = 3100, 
-  filename = file.path("tmp", 
-    "features",
-    paste0("feature_", 
-        i, 
-        "_", 
-        round(mz(mse_all_filt)[i],3), 
-        ".png")))
-}
-
 ```
 
 # ROI Segmentation
@@ -491,7 +459,7 @@ background_and_bone_features <- Cardinal::subset(m,
                                                  cartilage_vector=="other")
 ```
 
-Unlike cartilage, we have selected six features for background/ECM segmentation. Instead of segmenting each individually, we will first combine them into a single feature by using the pixel-wise mean. `condense_groups` (supplied from `Utilities.R`) uses the `group_ids` assigned by `grouping_df` to combine features into groups. The `agg_fun="mean"` specifies we want to combine groups via the pixel-wise mean.
+Unlike cartilage, we have selected seven features for background/ECM segmentation. Instead of segmenting each individually, we will first combine them into a single feature by using the pixel-wise mean. `condense_groups` (supplied from `Utilities.R`) uses the `group_ids` assigned by `grouping_df` to combine features into groups. The `agg_fun="mean"` specifies we want to combine groups via the pixel-wise mean.
 
 ```{r combine_background_features}
 grouping_df <- tibble(feature_id = 1:length(mz(background_and_bone_features)),
@@ -933,7 +901,7 @@ m <- readMSIData(file.path("Data",
   "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
 ```
 
-Normalization should only be performed on features which represent true biology. Additionally, features with very high intensity - far greater than endogenous analytes - will bias normalization and should be dropped. We will remove the mass calibrant and its isotopes.
+Normalization should only be performed on features which represent true biology. Additionally, features with very high intensity - far greater than endogenous analytes - will bias normalization and should be dropped. We will remove the mass calibrant's isotopes and adducts, retaining the monoisotopic calibrant peak itself for use as the normalization reference.
 
 ```{r remove-background-features}
 bg_mz_approx <- c(1570.6763, 
@@ -951,7 +919,7 @@ bg_idx <- features(m, mz=bg_mz_approx)
 bg_idx_isos <- features(m, mz=bg_isos_mz_approx) 
 ```
 
-```{r`}
+```{r}
 intensity(m) <- as.matrix(intensity(m))
 
 png(filename = "glufib_isos.png", width = 8000, height = 2000, bg = "black")
@@ -972,20 +940,22 @@ Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mi
 
 In our testing, we found reference had fewer downsides than global constant normalization methods like TIC normalization. TIC normalization assumes few ions are changign between samples. In studies of differential abundance between experimental groups with multiple samples, this assumption is unlikely to be correct. TIC assumes that the same amount of biological sample is being ionized in each pixel. This is also likely to be untrue due to both biology (ionization efficeny due to composition of different tissues) and experimental setup (pixels strattling the end of the sample may have less ionizationable material.) TIC normalization is highly sensitive to outliers. This can be mitgated by using median normalization instead, but median normalaiton can introduce other issues relating to sparsity (see above) when normalizaing features where the median is zero. Finally, on peak picked data with a skewed distributuon of peak intensities, TIC becomes a function of the most intense peaks. This issue, made worse by sparsity and outliers, enforces a strict spatial structure. Reference normalization also has issues. Normaliation is only possible on areas with detectable reference peaks, meaning the concentration and selection of the reference bears heavily on the normalization. References are representitve standards when they are similar to the analyes being measured. This makes references for heterogenous biomolecular classes liek metabolites unrepresentitive and unlikey to produce quality normalization. Finally, without ground truth availible, evalaution of these methods is diffcult. Normalization remains an active area of research. 
 
-We will start by only normalizing tissue areas.
+We will attach the ROI labels to each pixel for use in later steps. The tissue zones are not subset here - normalization is applied to the full dataset, and tissue areas are subset in downstream steps.
 
 ```{r}
 load(file.path("Outputs","roi_list.Rdata"))
 
 # confirm coords are in the correct order
-all(pData(m)$x == roi_list$x)
-all(pData(m)$y == roi_list$y)
-all(pData(m)$run == roi_list$run)
+stopifnot(
+  all(pData(m)$x == roi_list$x),
+  all(pData(m)$y == roi_list$y),
+  all(pData(m)$run == roi_list$run)
+)
 
 pData(m)$tissue_zone <- roi_list$tissue_zone
 
 normalized <- m |>
-        normalize(ref = 1570.6763, scale = 100000) |>
+        normalize(method = "reference", ref = 1570.6763, scale = 1000) |>
         process(BPPARAM=SnowfastParam(workers = 5L)) |>
         summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
           na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
@@ -1088,6 +1058,7 @@ modeling_frame <- mse_frame |>
 
 library(purrr)
 library(broom)
+library(ggplot2)
 
 results <- modeling_frame %>%
   group_by(feature_id) %>%
@@ -1110,7 +1081,8 @@ results |>
   stat_smooth(method = "lm") + 
   theme_minimal() +
   coord_equal() +
-  ggpubr::stat_regline_equation(aes(label = ..eq.label..), label.x = 1.25, label.y = .15, color = "blue")
+  ggpubr::stat_regline_equation(aes(label = ..eq.label..), label.x = 1.25, label.y = .15, color = "blue") +
+  xlim(0, 2) + ylim(0,2)
 
 ggsave(file.path("Recreated-Figures", "Figure-ROI-Segmentation-Method-P-Values.png"), height = 5.0, width = 5.3)
 ```
