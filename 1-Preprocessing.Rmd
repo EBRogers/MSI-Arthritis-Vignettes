@@ -227,37 +227,7 @@ invisible(gc())
 experimentData(mse_all_aligned)$spectrumRepresentation <- "centroid spectrum"
 ```
 
-Cardinal automatically calculates `freq` during peak picking, but this metric is computed across all runs. In our workflow, we recommend filtering peaks by non-zero frequency on a per-run basis. The function below can do this.
-
-```{r}
-filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
-                                   run_col = "run",
-                                   spectra_name = "intensity"){
-  pd <- pixelData(mse)
-  run <- pd[[run_col]]
-  if (is.null(run)) stop("pixelData(mse)$", run_col, " is NULL")
-  run <- as.factor(run)
-
-  X <- spectra(mse, spectra_name)
-
-  keep <- rep_len(TRUE, nrow(mse))
-
-  for (lv in levels(run)) {
-    cols <- which(run == lv)
-    if (length(cols) == 0L) next
-
-    Xr <- X[, cols, drop = FALSE]
-
-    # present iff finite AND non-zero
-    present_counts <- rowSums(is.finite(Xr) & (Xr != 0))
-
-    freq <- present_counts / length(cols)
-    keep <- keep & (freq >= cutoff)
-  }
-
-  mse[keep, , drop = FALSE]
-}
-```
+Cardinal automatically calculates `freq` during peak picking, but this metric is computed across all runs. In our workflow, we recommend filtering peaks by non-zero frequency on a per-run basis. The function `filterFeaturesByRunFreq` in `Utilities.R` can do this.
 
 Using the function defined above, filter peaks so that only peaks where `freq >= 0.05` in every run are retained.
 

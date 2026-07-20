@@ -89,12 +89,12 @@ We will be filtering by mean and standard deviation. We assume that noisy, non-i
 Now we can compute the mean and standard deviation of each feature across all samples.
 
 ```{r}
+mse <- subsetPixels(tissue_zone != "background")
 intensity(mse) <- as.matrix(intensity(mse))
 mse <- summarizeFeatures(mse,
                         stat = c("mean", "sd", "nnzero"),
                         na.rm = TRUE,
-                        #BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
-                        BPPARAM = SerialParam(),
+                        BPPARAM = SnowfastParam(workers = 10L, force.GC = TRUE),
                         verbose = F)
 
 ```
@@ -144,8 +144,6 @@ Although powerful, we did not find the computational overhead of these methods t
 The helpers below live in `IsotopeUtilities.R`; each step is a small function so the process stays visible here. First, enumerate candidate pairs whose mass gap matches a C-13 spacing (`k = 1, 2`) within our mass tolerance. This uses no ion images, only m/z.
 
 ```{r iso_candidates}
-# correlate over all pixels; for non-background only, set:
-# mse_corr <- subsetPixels(mse, tissue_zone != "background")
 mse_corr <- mse
 X    <- as.matrix(spectra(mse_corr))
 mzv  <- mz(mse_corr)
@@ -201,9 +199,11 @@ We will aggregate features by selecting the feature with the highest mean intens
 
 ```{r row_means_matter}
 mse_no_background_filtered <- mse |>
-                              subsetPixels(tissue_zone != "background") |>
+                              subsetPixels(tissue_zone != "background") |> #just in case
                               subsetFeatures(mz %in% iso_merged$mz) |>
                               summarizeFeatures(stat = "mean", na.rm = T)
+
+stopifnot(all(mz(mse)==iso_merged$mz))
 
 iso_merged$mean <- as.vector(fData(mse_no_background_filtered)$mean)
 ```
@@ -212,8 +212,6 @@ Now let's drop low abundance isotopes, keeping only the feature with the highest
 
 ```{r}
 #sanity check
-all(mz(mse)==iso_merged$mz)
-  
 isotopes_to_keep <- iso_merged |>
                           group_by(group_id) |>
                           filter(mean == max(mean)) |>
@@ -233,36 +231,6 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 
 Like during initial peak picking, we will apply a filter that will save us a lot of trouble later during statistical modeling. Highly sparse features create unstable estimates of mean abundance. The models detailed in this work assume normal distributions of residuals. Zero inflation will cause serious deviation from this assumption, yielding poor fit and invalid results. To keep things simple, we will drop features that are very sparse in the cartilage ROI. This represents a conservative modeling approach and will drastically reduce the number of features we continue analysis with. Alternate options include using models that are invariant to zero inflation.
 
-```{r}
-filterFeaturesByRunFreq <- function(mse, cutoff = 0.01,
-                                   run_col = "run",
-                                   spectra_name = "intensity"){
-  pd <- pixelData(mse)
-  run <- pd[[run_col]]
-  if (is.null(run)) stop("pixelData(mse)$", run_col, " is NULL")
-  run <- as.factor(run)
-
-  X <- spectra(mse, spectra_name)
-
-  keep <- rep_len(TRUE, nrow(mse))
-
-  for (lv in levels(run)) {
-    cols <- which(run == lv)
-    if (length(cols) == 0L) next
-
-    Xr <- X[, cols, drop = FALSE]
-
-    # present iff finite AND non-zero
-    present_counts <- rowSums(is.finite(Xr) & (Xr != 0))
-
-    freq <- present_counts / length(cols)
-    keep <- keep & (freq >= cutoff)
-  }
-
-  mse[keep, , drop = FALSE]
-}
-```
-
 Drop features that are present (non-zero and finite) in fewer than 25% of pixels in any run.
 
 ```{r}
@@ -274,7 +242,7 @@ mse_cartilage <- summarizeFeatures(mse_cartilage,
                                   groups = mse_cartilage$run,
                                   verbose = F)
 
-mse_cartilage_filt <- filterFeaturesByRunFreq(mse_cartilage, 0.25)
+mse_cartilage_filt <- filterFeaturesByRunFreq(mse_cartilage, 0.5)
 ```
 
 
@@ -291,17 +259,15 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 ### Code to recreate figures and tables
 
 ```{r, results='hide', warning=FALSE, message=FALSE}
-mse_pp <- readMSIData(file.path("Data", "Preprocessing", "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"),
+mse_pp <- readMSIData(file.path("Data", "Preprocessing", "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"),
   verbose = F)
 cat("After Peak Picking ",length(mz(mse_pp)), "\n")
 
-
-bg_mz_approx <- c(1570.6786, 1571.6801, 1572.6808, 1592.6699, 1593.6739, 1594.6766)
+bg_mz_approx <- c(1570.6763, 1571.6790, 1572.6831, 1592.6613, 1593.6630, 1594.6662)
 cat("After dropping internal standard ions [-6]) ", length(mz(mse_pp))-length(bg_mz_approx), "\n")
 
-
 mse_pre_filt <- readMSIData(COMBINED_DATA_PATH)
-other_ions_in_roi_selection <- c(1141.5556, 1142.524, 1608.6582)
+other_ions_in_roi_selection <- c(1141.5556, 1142.5732, 1608.631)
 cat("After dropping other ions used in ROI selection [-3] and before NS filtering ",
   length(mz(mse_pre_filt)) - length(other_ions_in_roi_selection),"\n")
 
@@ -323,9 +289,9 @@ cat("After cartilage sparsity filtering ", length(mz(mse_cart_filtered)), "\n")
 ```{r, results='hide', warning=FALSE, message=FALSE}
 cat("Table S3\n")
 cat("Approximate m/z of preselected features used to segment cartilage (and isotopes/spatial analogs): ", 
-  paste(round(c(1141.5556, 1142.524),3), collapse = ", "), "\n")
+  paste(round(c(1141.585, 1142.585),3), collapse = ", "), "\n")
 cat("Approximate m/z of preselected features used to segment background (and isotopes/spatial analogs): ", 
-  paste(round(c(1570.6786, 1571.6801, 1572.6808, 1592.6699,1593.6739, 1594.6766, 1608.6582),3), collapse = ", "), "\n")
+  paste(round(c(1570.6763, 1571.6790, 1572.6831, 1592.6613, 1593.6630, 1594.6662, 1608.631),3), collapse = ", "), "\n")
 cat("Approximate m/z of features removed by non-specific filtering: ", 
   paste(setdiff(round(setdiff(mz(mse_pre_filt), mz(mse_ns_filt)),3), round(other_ions_in_roi_selection, 3)), collapse = ", "), "\n")
 
