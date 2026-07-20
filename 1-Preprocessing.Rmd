@@ -136,10 +136,11 @@ Peak recalibration aligns spectra to a shared reference. We will perform this st
 Recalibration is the most computational and memory intensive step in preprocessing. It may take a long time, and may consume all of your device's memory. Adjust parallel processing parameters as necessary. 
 
 ```{r}
-calibrant_mz <- 1570.6896
+# glufib [m + h] mz
+calibrant_mz <- 1570.6774
 
 for (n in names(mse_list_raw)){
-  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," SMOOTHING\n")
+  cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," SMOOTHING+BLR\n")
   m <- mse_list_raw[[n]] |>
     smooth(method = "gaussian", width = 5, sd = 0.8) |>
     reduceBaseline(method = "median") |>
@@ -222,8 +223,6 @@ mse_all_aligned <- mse_all_picked |>
 rm(mse_list_rp, mse_all_queued)
 invisible(gc())
 
-mse_all_aligned
-
 # This is likely unnecessary, but may prevent 
 # issues with older versions of Cardinal
 experimentData(mse_all_aligned)$spectrumRepresentation <- "centroid spectrum"
@@ -303,9 +302,6 @@ Remove unnecessary objects from memory.
 #CLEAN UP
 rm(m, mse_all_filt, mse_all)
 invisible(gc())
-
-#REMOVE BEFORE FLIGHT
-knitr::knit_exit()
 ```
 
 
@@ -402,16 +398,16 @@ First, let's subset a representative image. We will locate the features with m/z
 ```{r roi_setup}
 m <- readMSIData(file.path(DATA_PATH, MSE_FILENAMES[1]), verbose=F)
 
-cartilage_feature_approx <- 1141.5556
+cartilage_feature_approx <- 1141.585
 cartilage_feature_ids <- features(m, mz = cartilage_feature_approx)
 
-background_feature_approx <- c(1570.6786, 
-                                1571.6801, 
-                                1572.6808, 
-                                1592.6699, 
-                                1593.6739, 
-                                1594.6766, 
-                                1608.6582)
+background_feature_approx <- c(1570.6763, 
+                                1571.6790, 
+                                1572.6831, 
+                                1592.6613, 
+                                1593.6630, 
+                                1594.6662, 
+                                1608.631)
 background_feature_ids <- features(m, mz = background_feature_approx)
 
 m <- summarizeFeatures(m, 
@@ -464,7 +460,7 @@ sdgmm <- spatialDGMM(cartilage_features,
 cartilage_vector <- recode_values(as.character(sdgmm$class[[1]]),
                                "5" ~ "other", 
                                "4" ~ "other",
-                               "3" ~ "other", 
+                               "3" ~ "cartilage", 
                                "2" ~ "cartilage", 
                                "1" ~ "cartilage")
 
@@ -591,17 +587,17 @@ mse_list_segmented <- BiocParallel::bplapply(
         y
       })
 
-    cartilage_feature_approx <- 1141.5556
+    cartilage_feature_approx <- 1141.585
     cartilage_feature_ids <- features(mse, 
       mz = cartilage_feature_approx)
 
-    background_feature_approx <- c(1570.6786, 
-                                1571.6801, 
-                                1572.6808, 
-                                1592.6699, 
-                                1593.6739, 
-                                1594.6766, 
-                                1608.6582)
+    background_feature_approx <- c(1570.6763, 
+                                  1571.6790, 
+                                  1572.6831, 
+                                  1592.6613, 
+                                  1593.6630, 
+                                  1594.6662, 
+                                  1608.631)
     background_feature_ids <- features(mse, 
       mz = background_feature_approx)
 
@@ -621,7 +617,7 @@ mse_list_segmented <- BiocParallel::bplapply(
         as.character(sdgmm1$class[[1]]),
         "5" ~ "other",
         "4" ~ "other",
-        "3" ~ "other",
+        "3" ~ "cartilage",
         "2" ~ "cartilage",
         "1" ~ "cartilage"
       )
@@ -722,7 +718,7 @@ sscs <- BiocParallel::bplapply(
         y
       })
 
-    ssc <- spatialShrunkenCentroids(mse, k = 5, weights = "adaptive")
+    ssc <- spatialShrunkenCentroids(mse, k = 6, weights = "adaptive")
     ssc
   },
   BPPARAM = bp
@@ -736,22 +732,22 @@ for (ssc in names(sscs)) {
 
 
 
-mvs_cartilage_class <- list("6891-OA-lateral" = c(3), 
-                        "6891-OA-medial" = c(4),
-                        "6908-OA-lateral" = c(3),
-                        "6908-OA-medial" = c(5),
-                        "6919-CAD-lateral" = c(5), 
-                        "6919-CAD-medial" = c(3),
-                        "6924-CAD-lateral" = c(3,5),
-                        "6924-CAD-medial" = c(4),
-                        "6938-CAD-lateral" = c(1),
-                        "6938-CAD-medial" = c(3),
+mvs_cartilage_class <- list("6891-OA-lateral" = c(1), 
+                        "6891-OA-medial" = c(1),
+                        "6908-OA-lateral" = c(5),
+                        "6908-OA-medial" = c(1),
+                        "6919-CAD-lateral" = c(1), 
+                        "6919-CAD-medial" = c(1),
+                        "6924-CAD-lateral" = c(5),
+                        "6924-CAD-medial" = c(3),
+                        "6938-CAD-lateral" = c(4),
+                        "6938-CAD-medial" = c(2),
                         "6944-CAD-lateral" = c(2),
                         "6944-CAD-medial" = c(1),
                         "6949-OA-lateral" = c(2),
-                        "6949-OA-medial" = c(4),
+                        "6949-OA-medial" = c(5),
                         "6954-OA-lateral" = c(3),
-                        "6954-OA-medial" = c(3))
+                        "6954-OA-medial" = c(1))
 
 pdata_list_mvs <- lapply(names(mse_list_pp), function(nm) {
   class_vec <- sscs[[nm]]$class
@@ -934,20 +930,21 @@ We will perform normalization on the unified dataset.
 ```{r read-combined-aligned}
 m <- readMSIData(file.path("Data", 
   "Preprocessing", 
-  "Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
+  "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
 ```
 
 Normalization should only be performed on features which represent true biology. Additionally, features with very high intensity - far greater than endogenous analytes - will bias normalization and should be dropped. We will remove the mass calibrant and its isotopes.
 
 ```{r remove-background-features}
-bg_mz_approx <- c(1570.6786, 
-                  1571.6801, 
-                  1572.6808, 
-                  1592.6699, 
-                  1593.6739, 
-                  1594.6766)
+bg_mz_approx <- c(1570.6763, 
+                  1571.6790, 
+                  1572.6831, 
+                  1592.6613, 
+                  1593.6630, 
+                  1594.6662, 
+                  1608.631)
 
-bg_isos_mz_approx <- bg_mz_approx[2:6]
+bg_isos_mz_approx <- bg_mz_approx[2:7]
 
 bg_idx <- features(m, mz=bg_mz_approx) 
 
@@ -958,12 +955,11 @@ bg_idx_isos <- features(m, mz=bg_isos_mz_approx)
 intensity(m) <- as.matrix(intensity(m))
 
 png(filename = "glufib_isos.png", width = 8000, height = 2000, bg = "black")
-image(m, i = bg_idx, grid = F, key = F, style= "dark", layout = c(6,16))
+image(m, i = bg_idx, grid = F, key = F, style= "dark", layout = c(7,16), scale = T)
 dev.off()
 ```
 
 ```{r}
-
 m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx_isos])
 ```
 
@@ -981,9 +977,15 @@ We will start by only normalizing tissue areas.
 ```{r}
 load(file.path("Outputs","roi_list.Rdata"))
 
-mse <- m |>
-        subsetPixels(tissue_zone != "background") |>
-        normalize(ref = 1570.6786) |>
+# confirm coords are in the correct order
+all(pData(m)$x == roi_list$x)
+all(pData(m)$y == roi_list$y)
+all(pData(m)$run == roi_list$run)
+
+pData(m)$tissue_zone <- roi_list$tissue_zone
+
+normalized <- m |>
+        normalize(ref = 1570.6763, scale = 100000) |>
         process(BPPARAM=SnowfastParam(workers = 5L)) |>
         summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
           na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
