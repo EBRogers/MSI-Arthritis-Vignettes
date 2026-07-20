@@ -34,6 +34,7 @@ library(data.table)
 library(fuzzyjoin)
 library(Cardinal)
 source(file.path("Utilities.R"))
+source(file.path("IsotopeUtilities.R"))
 
 
 setCardinalVerbose(verbose = FALSE)
@@ -53,25 +54,27 @@ We will load the combined, normalized, peak-picked image. The imzML format does 
 
 ```{r load_imzML}
 mse <- readMSIData(COMBINED_DATA_PATH, verbose = F)
-
-pData(mse)$tissue_zone <- as.data.table(pData(mse)) |>
-  left_join(roi_list, by = c("x","y","run")) |>
-  dplyr::pull(tissue_zone)
 ```
 
 Some features used for segmentation remain. Conducting analysis on these features is double dipping, as they have been used to create the ROIs. You can explore this concept in greater detail in `Simulation-2`. `features` will throw warnings if it can't find a close enough m/z value. Assuming that feature was already dropped, that is OK. (Warnings are muted for this chunk.)
 
 ```{r drop_segmentation_mz, warning=FALSE}
-rounded_mz_of_ROI_segmentation_ions <- c(1141.5556, 1142.524, 1570.6786, 
-                                        1571.6801, 1572.6808, 1592.6699, 
-                                        1593.6739, 1594.6766, 1608.6582)
+rounded_mz_of_ROI_segmentation_ions <- c(1141.585, 
+                                1142.5732, 
+                                1570.6763, 
+                                1571.6790, 
+                                1572.6831, 
+                                1592.6613, 
+                                1593.6630, 
+                                1594.6662, 
+                                1608.631)
 
 indices_of_ROI_segmentation_ions <- features(mse, 
                             mz = rounded_mz_of_ROI_segmentation_ions, 
                             tolerance = .001, 
                             units = "mz")
 
-# If following the vignettes exactly the above step should yield two indicies
+# If following the vignettes exactly the above step should yield three indicies
 
 if (length(indices_of_ROI_segmentation_ions) >= 1) {
   # work around as mse[-indicies_to_drop] not supported
@@ -86,11 +89,12 @@ We will be filtering by mean and standard deviation. We assume that noisy, non-i
 Now we can compute the mean and standard deviation of each feature across all samples.
 
 ```{r}
+intensity(mse) <- as.matrix(intensity(mse))
 mse <- summarizeFeatures(mse,
                         stat = c("mean", "sd", "nnzero"),
                         na.rm = TRUE,
-                        BPPARAM = SnowfastParam(workers = 12L, 
-                                                force.GC = TRUE),
+                        #BPPARAM = SnowfastParam(workers = 12L, force.GC = TRUE),
+                        BPPARAM = SerialParam(),
                         verbose = F)
 
 ```
@@ -99,7 +103,7 @@ Now we can identify features to drop.
 
 ```{r}
 mz_to_keep <- mz(subsetFeatures(mse,
-                              !(sd < quantile(sd, p = 0.25) & 
+                              !(sd < quantile(sd, p = 0.25) | 
                                 mean < quantile(mean, p = 0.25))))
  
 ```
@@ -107,8 +111,8 @@ mz_to_keep <- mz(subsetFeatures(mse,
 Let's visualize the filter.
 
 ```{r ns_filt_visualize}
-as_tibble(fData(mse_no_background)) |>
-  mutate(keep = !(mean < quantile(mean, p = 0.25) & sd < quantile(sd, p = 0.25))) |>
+as_tibble(fData(mse)) |>
+  mutate(keep = !(mean < quantile(mean, p = 0.25) | sd < quantile(sd, p = 0.25))) |>
   ggplot(aes(x = mean, y = sd, color = keep)) +
   geom_point(alpha = 0.4)
 ```
@@ -137,6 +141,55 @@ As of version 3.6, Cardinal does not offer feature clustering methods. In this w
 
 Although powerful, we did not find the computational overhead of these methods to be feasible for most analyses. Additionally, neither is design for multi-sample datasets. We have instead opted to perform rudimentary clustering of C-13 isotopes using simpler methods, specifically by first identifying isotopic candidates with a known mass delta (with a mass error tolerance) then classifying candidates as isotopes by their ion image similarity. We will use pearson correlation of to assess spatial similarity and select the similary cutoff as the lowest correlation value yeilding minimal incorrect classification of random decoys pairs.
 
+The helpers below live in `IsotopeUtilities.R`; each step is a small function so the process stays visible here. First, enumerate candidate pairs whose mass gap matches a C-13 spacing (`k = 1, 2`) within our mass tolerance. This uses no ion images, only m/z.
+
+```{r iso_candidates}
+# correlate over all pixels; for non-background only, set:
+# mse_corr <- subsetPixels(mse, tissue_zone != "background")
+mse_corr <- mse
+X    <- as.matrix(spectra(mse_corr))
+mzv  <- mz(mse_corr)
+runf <- as.factor(run(mse_corr))
+
+candidates <- find_isotope_candidates(mzv, ppm = 60, iso_spacing = 1.00335, iso_orders = 1:2)
+```
+
+Score each candidate by the spatial similarity of its two ion images. We correlate within each run and aggregate with the median, so a pair must co-localize consistently across samples. Swap `run_agg`/`pixel_mask` here to change the correlation definition.
+
+```{r iso_candidate_corr}
+candidates$corr <- score_pairs(candidates, X, runf, run_agg = "median", pixel_mask = "all")
+```
+
+To pick a cutoff we need a null. Following MetaSpace's target-decoy FDR, we re-pair each candidate anchor with random features at implausible mass offsets (>3 Da, so they cannot be isotopes), repeated 20 times, and score those the same way.
+
+```{r iso_decoy_corr}
+decoys <- make_decoy_pairs(candidates, mzv, n_rep = 20, min_mz_gap = 3, seed = 1)
+decoys$corr <- score_pairs(decoys, X, runf, run_agg = "median", pixel_mask = "all")
+```
+
+The cutoff is the lowest correlation at which the estimated FDR (median decoy hits / candidate hits) falls to our target. Real candidates should pile up at high correlation while decoys stay low.
+
+```{r iso_cutoff}
+fdr    <- estimate_isotope_fdr(candidates$corr, decoys$corr, decoys$rep, target_fdr = 0.10)
+cutoff <- fdr$cutoff
+
+bind_rows(
+  tibble(corr = candidates$corr, set = "candidate"),
+  tibble(corr = decoys$corr,     set = "decoy")
+) |>
+  ggplot(aes(corr, y = after_stat(ncount), fill = set)) +
+  geom_histogram(alpha = 0.5, position = "identity", bins = 40, na.rm = TRUE) +
+  geom_vline(xintercept = cutoff, linetype = "dashed") +
+  labs(x = "Pearson correlation", y = "scaled density", fill = NULL,
+       title = sprintf("Isotope cutoff = %.2f (FDR = %.0f%%)", cutoff, 100 * 0.10))
+```
+
+Keep candidate pairs above the cutoff and resolve isotope groups as connected components (so an M+0/M+1/M+2 envelope becomes one group). Every feature gets a `group_id`; unmatched features are singletons.
+
+```{r iso_groups}
+iso_edges  <- candidates |> filter(is.finite(corr), corr > cutoff)
+iso_merged <- assign_isotope_groups(iso_edges, mzv, iso_spacing = 1.00335)
+```
 
 # Feature aggregation
 
