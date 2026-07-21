@@ -60,13 +60,13 @@ Like statistical modeling, we perform statistical testing in Cardinal or externa
 ```{r load_imzML}
 load(file.path("Outputs", "meansTest_cartilage_lmer.RData"))
 
-model_fit_eval <- read_csv(file.path("Outputs", "feature-model-fit-evaluation.csv"), show_col_types = FALSE) |> 
-  mutate(across(qq_normality:outliers, as.factor))
+model_fit_eval <- read_csv(file.path("Outputs", "feature-model-fit-evaluation-revision.csv"), show_col_types = FALSE) |> 
+  mutate(across(qq:outliers, as.factor))
 
 passed <- model_fit_eval |> 
-          filter(qq_normality == "OK" & 
-            residual_variance == "OK" & 
-            outliers == "OK" )
+          filter(qq == "ok" & 
+            var == "ok" & 
+            outliers == "ok" )
 
 ```
 
@@ -75,9 +75,8 @@ passed <- model_fit_eval |>
 In `emmeans`, which Cardinal uses for hypothesis testing and which we will use externally, we can specify `~ condition | tissue` as `contrast.specs` for Hypothesis A (i.e., "condition given tissue"). To get the actual pairwise contrasts, we supply `"pairwise"` as the `contrast.method`. `emmeans` offers tremendous functionality and versatility, with [many possible ways to specify contrasts](https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html). We will explore other syntax when we repeat these analyses externally from Cardinal in the next part of this workflow.
 
 ```{r, results='hide', message=FALSE, warning=FALSE}
+measTest_models_with_acceptable_fit <- lmer_means_test[passed$fid]
 
-#measTest_models_with_acceptable_fit <- lmer_means_test[passed$feature_id]
-measTest_models_with_acceptable_fit <- lmer_means_test
 h <- Cardinal::contrastTest(measTest_models_with_acceptable_fit, ~condition * tissue, method="pairwise")
 ```
 
@@ -143,7 +142,7 @@ Like in Cardinal, we will test comparisons externally with `emmeans` again, show
 ```{r}
 load(file.path("Outputs","cartilage_results.RData"))
 
-cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
+cartilage_models_OK_fit <- cartilage_res[[1]][passed$fid]
 ```
 
 We will write a function to perform test hypotheses for each model, but first, let's experiment with different ways to specify contrasts in `emmeans`, again using the model for `r round(h@elementMetadata[1,2], 3)` m/z.
@@ -256,12 +255,12 @@ When performing multiple tests, the distribution of p-values can reveal informat
 ```{r}
 signift_cartilage |> 
   ggplot(aes(x = p.value)) +
-  geom_histogram(bins = 7, fill = "gray50", color = "white", boundary = 0) +
+  geom_histogram(binwidth = 0.1, fill = "gray50", color = "white", boundary = 0) +
   facet_wrap(~contrast, labeller = labeller(contrast = c(
     "control_vs_osteoarthritis_in_medial" = "OA vs. Control in Medial",
     "lateral_vs_medial_in_osteoarthritis" = "Medial vs. Lateral in OA"
   ))) +
-  scale_x_continuous(breaks = seq(0, 1, by = 0.2)) +
+  scale_x_continuous(breaks = seq(0, 1, by = 0.1)) +
   labs(
     x = expression(italic(P)~value),
     y = "Count"
@@ -279,12 +278,18 @@ As the distribution of p-values is neither uniform nor right-skewed, there may b
 
 This code below will recreate the tables and figures from the manuscript.
 ```{r, results='hide', warning=FALSE, message=FALSE, output = "hide"}
-knitr::kable(model_fit_eval |> select(-c(feature_id)))
+knitr::kable(model_fit_eval |> |> select(-c(fid)))
+
+m <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"))
+
+stopifnot(length(mz(m))>=max(passed$fid))
 
 signift_cartilage |> 
   filter(contrast == "control_vs_osteoarthritis_in_medial") |>
   mutate(feature_id = as.integer(feature_id)) |>
-  left_join(passed) |>
+  left_join(passed |> 
+            mutate(feature_id = as.integer(fid),
+                   mz = mz(m)[passed$fid])) |>
   mutate(`M/Z` = round(mz, 3),
           Estimate = round(estimate, 3),
           Std.Error = round(SE, 3),
@@ -297,7 +302,9 @@ signift_cartilage |>
 signift_cartilage |> 
   filter(contrast == "lateral_vs_medial_in_osteoarthritis") |>
   mutate(feature_id = as.integer(feature_id)) |>
-  left_join(passed) |>
+  left_join(passed |> 
+            mutate(feature_id = as.integer(fid),
+                   mz = mz(m)[passed$fid])) |>
   mutate(`M/Z` = round(mz, 3),
           Estimate = round(estimate, 3),
           Std.Error = round(SE, 3),

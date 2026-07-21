@@ -829,7 +829,7 @@ m <- readMSIData(file.path("Data",
   "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"))
 ```
 
-Normalization should only be performed on features which represent true biology. Additionally, features with very high intensity - far greater than endogenous analytes - will bias normalization and should be dropped. We will remove the mass calibrant's isotopes and adducts, retaining the monoisotopic calibrant peak itself for use as the normalization reference.
+Normalization should only be performed on features which represent true biology. Additionally, features with very high intensity - far greater than endogenous analytes - will bias normalization and should be dropped. We will remove the mass calibrant along with its isotopes and adducts, as their very high intensity would otherwise dominate the total ion current.
 
 ```{r remove-background-features}
 bg_mz_approx <- c(1570.6763, 
@@ -850,7 +850,7 @@ bg_idx_isos <- features(m, mz=bg_isos_mz_approx)
 ```{r}
 intensity(m) <- as.matrix(intensity(m))
 
-m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx_isos])
+m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx])
 ```
 
 ## A note on sparsity
@@ -858,9 +858,9 @@ m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx_isos])
 Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mix of concepts: zero intensity, intensity below the limit of detection, and missing values. Although each is subtly different, they are highly interlinked due to the nature of mass spectrometry. In practice, they behave similarly, but these conceptual similarities do not extend to preprocessing. Zero and missing values behave very differently in a mathematical sense. In general, zeros are retained while missing values are dropped. Zeros bias summaries towards zero, especially means. Missing values are often dropped, meaning that summaries are biased larger towards non-missing values. There is no good way around this predicament other than to reduce sparsity by defining more stringent ROIs and filtering highly sparse features. Regardless, at the time of normalization one will need to choose a method (leaving zeros as they are, or replacing them with NAs) and stick with it through analysis.
 
 
-## Preparing spectra for median normalization
+## Preparing spectra for normalization
 
-In our testing, we found reference had fewer downsides than global constant normalization methods like TIC normalization. TIC normalization assumes few ions are changign between samples. In studies of differential abundance between experimental groups with multiple samples, this assumption is unlikely to be correct. TIC assumes that the same amount of biological sample is being ionized in each pixel. This is also likely to be untrue due to both biology (ionization efficeny due to composition of different tissues) and experimental setup (pixels strattling the end of the sample may have less ionizationable material.) TIC normalization is highly sensitive to outliers. This can be mitgated by using median normalization instead, but median normalaiton can introduce other issues relating to sparsity (see above) when normalizaing features where the median is zero. Finally, on peak picked data with a skewed distributuon of peak intensities, TIC becomes a function of the most intense peaks. This issue, made worse by sparsity and outliers, enforces a strict spatial structure. Reference normalization also has issues. Normaliation is only possible on areas with detectable reference peaks, meaning the concentration and selection of the reference bears heavily on the normalization. References are representitve standards when they are similar to the analyes being measured. This makes references for heterogenous biomolecular classes liek metabolites unrepresentitive and unlikey to produce quality normalization. Finally, without ground truth availible, evalaution of these methods is diffcult. Normalization remains an active area of research. 
+We will use total ion current (TIC) normalization, which scales each spectrum by its summed intensity. This assumes that the total amount of ionized material is comparable across pixels, so that differences in overall signal reflect nuisance variation rather than biology. Like other global-constant methods, TIC is sensitive to sparse and outlier pixels, which we address with a per-pixel filter below.
 
 We will attach the ROI labels to each pixel for use in later steps. The tissue zones are not subset here - normalization is applied to the full dataset, and tissue areas are subset in downstream steps.
 
@@ -877,23 +877,27 @@ stopifnot(
 pData(m)$tissue_zone <- roi_list$tissue_zone
 ```
 
-Reference normalization divides each spectrum by the reference peak, so pixels where the reference is near the noise floor yield unstable, inflated ratios. Before normalizing, we require the reference to be adequately detected, dropping pixels whose reference intensity falls below a floor. We set the floor at 50, which sits below the 5th percentile of reference intensity in tissue pixels (~110) so genuine signal is retained, while removing the small fraction of pixels (~3% of non-background pixels) at the noise floor and bounding the per-pixel normalization gain to `1000 / 50 = 20`.
+Before normalizing, we restrict to non-background pixels and apply a per-pixel quality filter, dropping pixels with fewer than 100 detected peaks or with a total ion current outside the 2nd to 98th percentile within each run. This removes sparse and aberrant pixels that would otherwise distort per-pixel normalization.
 
 ```{r}
-ref_idx <- features(m, mz = 1570.6763)
-ref_intensity <- as.numeric(spectra(m)[ref_idx, ])
-m <- subsetPixels(m, ref_intensity >= quantile(ref_intensity, p = c(.025)))
+m <- m |>
+  subsetPixels(tissue_zone != "background") |>
+  summarizePixels(stat = c(tic = "sum", nnz = "nnzero"), na.rm = TRUE,
+    BPPARAM = SnowfastParam(workers = 5L))
+
+qc <- as.data.table(pData(m))
+qc[, `:=`(lo = quantile(tic, 0.02), hi = quantile(tic, 0.98)), by = run]
+
+m <- subsetPixels(m, qc$nnz >= 100 & qc$tic >= qc$lo & qc$tic <= qc$hi)
 ```
 
 ```{r}
-scale_factor <- round(median(ref_intensity))
-
 normalized <- m |>
-        normalize(method = "reference", ref = 1570.6763, scale = scale_factor) |>
+        normalize(method = "tic", scale = 1000) |>
         process(BPPARAM=SnowfastParam(workers = 5L)) |>
-        summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
-          na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
-        summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
+        summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"),
+          na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |>
+        summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"),
           na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
 ```
 

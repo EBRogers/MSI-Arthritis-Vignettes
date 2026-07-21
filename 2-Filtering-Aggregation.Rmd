@@ -73,7 +73,7 @@ indices_of_ROI_segmentation_ions <- features(mse,
                             tolerance = .001, 
                             units = "mz")
 
-# If following the vignettes exactly the above step should yield three indicies
+# If following the vignettes exactly the above step should yield two indicies
 
 if (length(indices_of_ROI_segmentation_ions) >= 1) {
   # work around as mse[-indicies_to_drop] not supported
@@ -95,7 +95,6 @@ mse <- summarizeFeatures(mse,
                         na.rm = TRUE,
                         BPPARAM = SnowfastParam(workers = 10L, force.GC = TRUE),
                         verbose = F)
-
 ```
 
 Now we can identify features to drop.
@@ -178,7 +177,7 @@ bind_rows(
   geom_histogram(alpha = 0.5, position = "identity", bins = 40, na.rm = TRUE) +
   geom_vline(xintercept = cutoff, linetype = "dashed") +
   labs(x = "Pearson correlation", y = "scaled density", fill = NULL,
-       title = sprintf("Isotope cutoff = %.2f (FDR = %.0f%%)", cutoff, 100 * 0.50))
+       title = sprintf("Isotope cutoff = %.2f (FDR = %.0f%%)", cutoff, 100 * 0.05))
 ```
 
 Keep candidate pairs above the cutoff and resolve isotope groups as connected components (so an M+0/M+1/M+2 envelope becomes one group). Every feature gets a `group_id`; unmatched features are singletons.
@@ -242,14 +241,14 @@ mse_cartilage <- summarizeFeatures(mse_cartilage,
                                   verbose = F)
 
 mse_cartilage_filt <- filterFeaturesByRunFreq(mse_cartilage, 0.5)
+
+mse <- subsetFeatures(mse, mz %in% mz(mse_cartilage_filt))
 ```
 
 
 Save the as .imzML files. Onward to modeling!
 
 ```{r}
-mse <- subsetFeatures(mse, mz %in% mz(mse_cartilage_filt))
-
 writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"),
                 verbose = F)
 ```
@@ -322,6 +321,7 @@ knitr::kable(
       .groups = "drop"
     )
 )
+
 m <- mse_pre_filt |> 
     subsetFeatures(mz %in% mz(mse_ns_filt)) |>
     subsetPixels(mse_pre_filt$run == "6891-OA-lateral")
@@ -330,20 +330,20 @@ jl_3 <- sort(unique(iso_merged |> group_by(group_id) |>
   mutate(n = n()) |> ungroup() |> filter(n == 3) |> pull(group_id)))
 
 #all
-#image_png(m, i = iso_merged |> filter(group_id %in% jl_3) |> pull(feature_id), scale = T,
-#style = "dark", bg="black", key = F, grid = F, pointsize = 36, superpose = F, filename="tmp/all_3mbisos.png", 
-#      width = 1500,
-#      height = 100 + (300 * length(jl_3)),
-#      layout = c(length(jl_3),3),
-#      xaxt = "n",
-#      yaxt = "n",
-#      ylab = NA,
-#      xlab = NA)
+image_png(m, i = iso_merged |> filter(group_id %in% jl_3) |> pull(feature_id), scale = T,
+style = "dark", bg="black", key = F, grid = F, pointsize = 36, superpose = F, filename="tmp/all_3mbisos.png", 
+      width = 1500,
+      height = 100 + (300 * length(jl_3)),
+      layout = c(length(jl_3),3),
+      xaxt = "n",
+      yaxt = "n",
+      ylab = NA,
+      xlab = NA)
 
 
-id_1 <- iso_merged |> filter(group_id %in% c(19)) |> pull(feature_id)
-id_2 <- iso_merged |> filter(group_id %in% c(114)) |> pull(feature_id)
-id_3 <- iso_merged |> filter(group_id %in% c(131)) |> pull(feature_id)
+id_1 <- iso_merged |> filter(group_id %in% c(jl_3[25])) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id %in% c(jl_3[28])) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id %in% c(jl_3[34])) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-3-isotope-sii.png"), width = 1500, height = 900, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3]), 
@@ -358,23 +358,23 @@ image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_
       xlab = NA)
 dev.off()
 
-######### 2, 7, 15, 20, 25, 33
+######### 
 jl <- sort(unique(iso_merged |> group_by(group_id) |> mutate(n = n()) |> ungroup() |> filter(n == 2) |> pull(group_id)))
 
 #all
-image_png(m, i = iso_merged |> filter(group_id %in% jl) |> pull(feature_id), scale = T,
-style = "dark", bg="black", key = F, grid = F, pointsize = 36, superpose = F, filename="tmp/all_2mbisos.png", 
-      width = 1500,
-      height = 100 + (300 * length(jl)),
-      layout = c(length(jl),2),
-      xaxt = "n",
-      yaxt = "n",
-      ylab = NA,
-      xlab = NA)
+#image_png(m, i = iso_merged |> filter(group_id %in% jl) |> pull(feature_id), scale = T,
+#style = "dark", bg="black", key = F, grid = F, pointsize = 36, superpose = F, filename="tmp/all_2mbisos.png", 
+#      width = 1500,
+#      height = 100 + (300 * length(jl)),
+#      layout = c(length(jl),2),
+#      xaxt = "n",
+#      yaxt = "n",
+#      ylab = NA,
+#      xlab = NA)
 
-id_1 <- iso_merged |> filter(group_id == jl[2]) |> pull(feature_id)
-id_2 <- iso_merged |> filter(group_id == jl[4]) |> pull(feature_id)
-id_3 <- iso_merged |> filter(group_id == jl[10]) |> pull(feature_id)
+id_1 <- iso_merged |> filter(group_id == jl[18]) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id == jl[21]) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id == jl[36]) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-2-isotope-sii.png"), width = 1500, height = 700, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]), 
