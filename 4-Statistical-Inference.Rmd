@@ -76,8 +76,8 @@ In `emmeans`, which Cardinal uses for hypothesis testing and which we will use e
 
 ```{r, results='hide', message=FALSE, warning=FALSE}
 
-measTest_models_with_acceptable_fit <- lmer_means_test[passed$feature_id]
-
+#measTest_models_with_acceptable_fit <- lmer_means_test[passed$feature_id]
+measTest_models_with_acceptable_fit <- lmer_means_test
 h <- Cardinal::contrastTest(measTest_models_with_acceptable_fit, ~condition * tissue, method="pairwise")
 ```
 

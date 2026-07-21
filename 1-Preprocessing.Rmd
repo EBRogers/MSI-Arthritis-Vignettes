@@ -507,7 +507,7 @@ image(m, "tissue_zone")
 Now we will repeat this procedure on all samples, saving the ROI labels in a named list and a data frame for visualization.
 
 ```{r}
-bp <- SnowfastParam(workers = 15L, force.GC = TRUE)
+bp <- SnowfastParam(workers = 16L, force.GC = TRUE)
 
 mse_list_segmented <- BiocParallel::bplapply(
   mse_list_pp,
@@ -543,14 +543,46 @@ mse_list_segmented <- BiocParallel::bplapply(
     cartilage_features <- mse[cartilage_feature_ids, ]
 
     set.seed(12345)
+    if (runNames(mse) %in% c("6924-CAD-medial")) {
+      # 6924-CAD-medial needed 6 clusters
     sdgmm1 <- spatialDGMM(
+          cartilage_features,
+          k = 6,
+          r = 5,
+          weights = "adaptive",
+          verbose = F
+        )
+    } else {
+      sdgmm1 <- spatialDGMM(
           cartilage_features,
           k = 5,
           r = 5,
           weights = "adaptive",
           verbose = F
         )
+    }
 
+    if (runNames(mse) %in% c("6954-OA-medial")) {
+      # 6954-OA-medial needed different grouping
+      cartilage_vector <- recode_values(
+        as.character(sdgmm1$class[[1]]),
+        "5" ~ "other",
+        "4" ~ "other",
+        "3" ~ "other",
+        "2" ~ "cartilage",
+        "1" ~ "cartilage"
+      )
+    } else if (runNames(mse) %in% c("6924-CAD-medial")) {
+      cartilage_vector <- recode_values(
+        as.character(sdgmm1$class[[1]]),
+        "6" ~ "other",
+        "5" ~ "other",
+        "4" ~ "other",
+        "3" ~ "cartilage",
+        "2" ~ "cartilage",
+        "1" ~ "cartilage"
+      )
+    } else {
       cartilage_vector <- recode_values(
         as.character(sdgmm1$class[[1]]),
         "5" ~ "other",
@@ -559,6 +591,8 @@ mse_list_segmented <- BiocParallel::bplapply(
         "2" ~ "cartilage",
         "1" ~ "cartilage"
       )
+    }
+      
 
     background_and_bone_features <- Cardinal::subset(
       mse,
@@ -635,82 +669,6 @@ roi_list <- hc_class_plotting_frame[, .(x, y, run, tissue_zone)]
 
 save(roi_list, file = file.path("Outputs", "roi_list.Rdata"))
 ```
-
-## Benchmark: segmentation with spatial shrunken centroids
-
-To illustrate the effect of segmentation method on P values, we will compare the single ion segmentation of the OA dataset to segmentation results from multivariate segmentation methods, specifically spatial shrunken centroids. Multiple values of `k` and `s` were tested. Segmentation did not meaningfully improve past `k=5` and there were minimal differences between different values of `s`, thus it was kept to `s = 0` (the default). Even still, several tissues demonstrated poor segmentation of cartilage. Additionally, as multivariate segmentation begins with random class allocation, it will not produce the same class labels for each tissue. Therefore, the author has annotated them, include situation when multiple classes must be combined into one to form cartilage. We will use these results at the end of the vignette to evaluate at sensitivity of T tests between conditions when performed on ROIs segmented with differernt methods. .
-```{r}
-bp <- SnowfastParam(workers = 16L, force.GC = TRUE)
-
-sscs <- BiocParallel::bplapply(
-  mse_list_pp,
-  function(mse) {
-    set.seed(54321)
-    # bug in matter - needs to be here for now
-    setMethod("as.vector", "sparse_arr",
-      function(x, mode = "any") {
-        if ( mode != "any" )
-        matter::type(x) <- mode
-        y <- as.vector(x[])
-        names(y) <- NULL
-        y
-      })
-
-    ssc <- spatialShrunkenCentroids(mse, k = 6, weights = "adaptive")
-    ssc
-  },
-  BPPARAM = bp
-)
-
-manage_directory("sscs")
-
-for (ssc in names(sscs)) {
-  image_png(sscs[[ssc]], "class", filename = file.path("sscs", paste0("ssc_",ssc,".png")))
-}
-
-
-
-mvs_cartilage_class <- list("6891-OA-lateral" = c(1), 
-                        "6891-OA-medial" = c(1),
-                        "6908-OA-lateral" = c(5),
-                        "6908-OA-medial" = c(1),
-                        "6919-CAD-lateral" = c(1), 
-                        "6919-CAD-medial" = c(1),
-                        "6924-CAD-lateral" = c(5),
-                        "6924-CAD-medial" = c(3),
-                        "6938-CAD-lateral" = c(4),
-                        "6938-CAD-medial" = c(2),
-                        "6944-CAD-lateral" = c(2),
-                        "6944-CAD-medial" = c(1),
-                        "6949-OA-lateral" = c(2),
-                        "6949-OA-medial" = c(5),
-                        "6954-OA-lateral" = c(3),
-                        "6954-OA-medial" = c(1))
-
-pdata_list_mvs <- lapply(names(mse_list_pp), function(nm) {
-  class_vec <- sscs[[nm]]$class
-  mse_list_pp[[nm]]$tissue_zone_mvs <- ifelse( class_vec %in% mvs_cartilage_class[[nm]] ,"cartilage","other")
-  dt <- as.data.table(pData(mse_list_pp[[nm]]))
-  dt[, id := nm]
-  dt
-})
-
-hc_class_plotting_frame_mvs <- rbindlist(pdata_list_mvs)
-roi_list_mvs <- hc_class_plotting_frame_mvs[, .(x, y, run, tissue_zone_mvs)]
-
-save(roi_list_mvs, file = file.path("Outputs", "roi_list_mvs.Rdata"))
-
-plt <- ggplot(hc_class_plotting_frame_mvs |> 
-         left_join(name_tibble, by = join_by(run)), 
-       aes(x = x, y = -1*y, fill = tissue_zone_mvs)) + 
-  geom_tile() +
-  theme_void() +
-  facet_wrap("tid", scales = "free", ncol = 2) +
-  scale_fill_brewer(palette = "Paired") +
-  theme(legend.position = "none") +
-  labs(fill = "ROI")
-```
-
 
 Visualization of all samples' ROIs.
 
@@ -892,12 +850,6 @@ bg_idx_isos <- features(m, mz=bg_isos_mz_approx)
 ```{r}
 intensity(m) <- as.matrix(intensity(m))
 
-png(filename = "glufib_isos.png", width = 8000, height = 2000, bg = "black")
-image(m, i = bg_idx, grid = F, key = F, style= "dark", layout = c(7,16), scale = T)
-dev.off()
-```
-
-```{r}
 m <- subsetFeatures(m, mz %ni% mz(m)[bg_idx_isos])
 ```
 
@@ -923,15 +875,26 @@ stopifnot(
 )
 
 pData(m)$tissue_zone <- roi_list$tissue_zone
+```
+
+Reference normalization divides each spectrum by the reference peak, so pixels where the reference is near the noise floor yield unstable, inflated ratios. Before normalizing, we require the reference to be adequately detected, dropping pixels whose reference intensity falls below a floor. We set the floor at 50, which sits below the 5th percentile of reference intensity in tissue pixels (~110) so genuine signal is retained, while removing the small fraction of pixels (~3% of non-background pixels) at the noise floor and bounding the per-pixel normalization gain to `1000 / 50 = 20`.
+
+```{r}
+ref_idx <- features(m, mz = 1570.6763)
+ref_intensity <- as.numeric(spectra(m)[ref_idx, ])
+m <- subsetPixels(m, ref_intensity >= quantile(ref_intensity, p = c(.025)))
+```
+
+```{r}
+scale_factor <- round(median(ref_intensity))
 
 normalized <- m |>
-        normalize(method = "reference", ref = 1570.6763, scale = 1000) |>
+        normalize(method = "reference", ref = 1570.6763, scale = scale_factor) |>
         process(BPPARAM=SnowfastParam(workers = 5L)) |>
         summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
           na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
         summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"), 
           na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
-
 ```
 
 Finally, save the normalized dataset.

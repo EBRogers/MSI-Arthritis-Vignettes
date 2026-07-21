@@ -35,19 +35,6 @@ library(Cardinal)
 library(broom.mixed)
 source("Utilities.R")
 
-zero_to_na <- function(x, mz) {
-  x[x == 0] <- NA_real_
-  x
-}
-
-bp_param <- function(workers) {
-  if (interactive()) {
-    SnowfastParam(workers = as.integer(workers), force.GC = TRUE)
-  } else {
-    NULL
-  }
-}
-
 setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
 ```
@@ -57,10 +44,6 @@ gcinfo(verbose = FALSE)
 ```{r find_imzML}
 DATA_PATH <- file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML")
 mse <- readMSIData(DATA_PATH)
-
-mse <- mse |>
-      addProcessing(zero_to_na, label="zero_to_na_before_modeling") |>
-  process(spectra="intensity", index="mz", BPPARAM = bp_param(3L))
 ```
 
 
@@ -82,11 +65,13 @@ pData(mse)$tissue_zone <- as.factor(pData(mse)$tissue_zone)
 pData(mse)$run <- as.factor(pData(mse)$run)
 
 mse <- subsetPixels(mse, tissue_zone == "cartilage")
+
+intensity(mse) <- as.matrix(intensity(mse))
 ```
 
 We are ready to fit the models. The fixed effects are specified in the second argument. `condition * tissue` is shorthand for `condition + tissue + condition:tissue`, which includes the main effects and their interaction. The random effects are specified in the third argument. `~ 1|subject` indicates that we want a random intercept for each subject. Specification of random effects for `lmer` can be found [here](https://cran.r-project.org/web/packages/lme4/vignettes/lmer.pdf). For compatibility with previous versions of Cardinal and `nlme::lme()`, the fixed and random effects are separated. The `samples` argument specifies the variable that delineates which pixels are included in each sample or experimental unit.
 
-For mixed effects models, we can run meansTest using the default implementation, `nlme::lme()`, or specify `lme4::lmer()` using `use_lmer=TRUE` for newer Cardinal releases. When modeling basic random effects structures, both implementations are equivalent. `lme4::lmer()` extended via `lmerTest` enables use of the Satterthwaite approximation for calculating degrees of freedom. As we have opted to replace zero values with NA's, we must pass `na.rm = TRUE` to ensure NA values are dropped during summarization. `meansTest` will summarize all pixels in the object. To specify the cartilage ROI, we used `subsetPixels` to eliminate non-cartilage pixels.
+For mixed effects models, we can run meansTest using the default implementation, `nlme::lme()`, or specify `lme4::lmer()` using `use_lmer=TRUE` for newer Cardinal releases. When modeling basic random effects structures, both implementations are equivalent. `lme4::lmer()` extended via `lmerTest` enables use of the Satterthwaite approximation for calculating degrees of freedom. We retain zero intensities during modeling rather than replacing them with NA's. We still pass `na.rm = TRUE` during summarization so that any NA values that do arise are dropped. `meansTest` will summarize all pixels in the object. To specify the cartilage ROI, we used `subsetPixels` to eliminate non-cartilage pixels.
 
 ### Modeling with `nlme::lme()` in Cardinal
 
@@ -218,7 +203,7 @@ knitr::kable(cartilage_res[[2]] |>
   summarize(`% models with ICC at or near zero` = sum(icc <= 0.0001)/n()*100, .by = isSingular))
 ```
 
-As we can see, most of the singular models have ICC values near zero (less than 0.0001), indicating that the models are not able to (meaningfully) partition out within-subject variance from residual variance. Aside from the theoretical issues implied by singularity (overly complex random effects structure, low biological variance relative to technical variance, etc.), singularity also interferes with calculation of degrees of freedom via the [Satterthwaite approximation](https://doi.org/10.2307/3002019). This method uses mean squares in the approximation, and when the model is singular, the mean squares for the random effect will be zero. `lmer` is aware of this problem and simply omits the random effect if singularity is detected, making it equivalent to a fixed effects model. Because we have the simplest random effects structure already, this solution is acceptable. However, for more complex random effects structures, one would instead iteratively remove random effect components until the model is no longer singular.
+As we can see, all of the singular models have ICC values near zero (less than 0.0001), indicating that the models are not able to (meaningfully) partition out within-subject variance from residual variance. Aside from the theoretical issues implied by singularity (overly complex random effects structure, low biological variance relative to technical variance, etc.), singularity also interferes with calculation of degrees of freedom via the [Satterthwaite approximation](https://doi.org/10.2307/3002019). This method uses mean squares in the approximation, and when the model is singular, the mean squares for the random effect will be zero. `lmer` is aware of this problem and simply omits the random effect if singularity is detected, making it equivalent to a fixed effects model. Because we have the simplest random effects structure already, this solution is acceptable. However, for more complex random effects structures, one would instead iteratively remove random effect components until the model is no longer singular.
 
 # Evaluating Model Assumptions
 
@@ -236,7 +221,6 @@ We will generate more informative QQ plots, as well as some other diagnostic plo
 ```{r}
 qq_plot_frame <- NULL
 set.seed(2025)
-selected_fids <- sort(sample(names(cartilage_res[[1]]), 20))
 for (fid in names(cartilage_res[[1]])) {
   model <- cartilage_res[[1]][[fid]]
   qq_plot_frame <- bind_rows(qq_plot_frame,
@@ -279,9 +263,7 @@ Let's generate interaction plots that will help us see the signal and effect bei
 ```{r}
 manage_directory("QQ-Itx-SII-Plots")
 
-m <- readMSIData(DATA_PATH) |>
-      addProcessing(zero_to_na, label="zero_to_na_before_modeling") |>
-  process(spectra="intensity", index="mz", BPPARAM = bp_param(8L)) 
+m <- readMSIData(DATA_PATH)
 
 feature_ids <- fids
 selected_mz <- fData(m)[feature_ids, , drop = FALSE]
@@ -533,7 +515,7 @@ Each plot can offer us some understanding of the fit of the model to our data.
 (C) **Single ion images of each sample:** We can observe generally high sparsity, and low overall intensity. Some samples are very sparse.
 (D) **Residual variance boxplots by independent variable:** Both show signs of unequal variance, especially between conditions.
 
-Here is the manual part: as we only have 124 model, we can manually diagnose assumption fit for each one using the set of plots in the `./QQ-Itx-SII-Plots` directory. I (the author) have done this manual classification myself, and added my determinations to `Outputs/feature-model-fit-evaluation.csv`. We will refrain from testing our hypotheses on models with poor fit, as we can no longer be sure the tests will yield accurate results.
+Here is the manual part: as we only have `r length(fids)` models, we can manually diagnose assumption fit for each one using the set of plots in the `./QQ-Itx-SII-Plots` directory. I (the author) have done this manual classification myself, and added my determinations to `Outputs/feature-model-fit-evaluation.csv`. We will refrain from testing our hypotheses on models with poor fit, as we can no longer be sure the tests will yield accurate results.
 
 To demonstrate common QQ plot shapes, and especially, what is considered "Normal" with only 16 samples, we can simulate plots below.
 

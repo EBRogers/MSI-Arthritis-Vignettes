@@ -45,12 +45,11 @@ gcinfo(verbose = FALSE)
 
 ```{r find_imzML}
 COMBINED_DATA_PATH <- file.path("Data","Preprocessing","normalized.imzML")
-load(file.path("Outputs", "roi_list.Rdata"))
 ```
 
 ## Load peak-picked imzML files
 
-We will load the combined, normalized, peak-picked image. The imzML format does not respect NA values, so Cardinal will read them as zeros when reloaded. We will also join the ROIs created in `1-Preprocessing`.
+We will load the combined, normalized, peak-picked image. The imzML format does not respect NA values, so Cardinal will read them as zeros when reloaded. The ROI labels (`tissue_zone`) created in `1-Preprocessing` are stored with the image and are available directly on the reloaded object.
 
 ```{r load_imzML}
 mse <- readMSIData(COMBINED_DATA_PATH, verbose = F)
@@ -89,7 +88,7 @@ We will be filtering by mean and standard deviation. We assume that noisy, non-i
 Now we can compute the mean and standard deviation of each feature across all samples.
 
 ```{r}
-mse <- subsetPixels(tissue_zone != "background")
+mse <- subsetPixels(mse, tissue_zone != "background")
 intensity(mse) <- as.matrix(intensity(mse))
 mse <- summarizeFeatures(mse,
                         stat = c("mean", "sd", "nnzero"),
@@ -149,7 +148,7 @@ X    <- as.matrix(spectra(mse_corr))
 mzv  <- mz(mse_corr)
 runf <- as.factor(run(mse_corr))
 
-candidates <- find_isotope_candidates(mzv, ppm = 60, iso_spacing = 1.00335, iso_orders = 1:2)
+candidates <- find_isotope_candidates(mzv, ppm = 20, iso_spacing = 1.00335, iso_orders = 1:2)
 ```
 
 Score each candidate by the spatial similarity of its two ion images. We correlate within each run and aggregate with the median, so a pair must co-localize consistently across samples. Swap `run_agg`/`pixel_mask` here to change the correlation definition.
@@ -168,7 +167,7 @@ decoys$corr <- score_pairs(decoys, X, runf, run_agg = "median", pixel_mask = "al
 The cutoff is the lowest correlation at which the estimated FDR (median decoy hits / candidate hits) falls to our target. Real candidates should pile up at high correlation while decoys stay low.
 
 ```{r iso_cutoff}
-fdr    <- estimate_isotope_fdr(candidates$corr, decoys$corr, decoys$rep, target_fdr = 0.10)
+fdr    <- estimate_isotope_fdr(candidates$corr, decoys$corr, decoys$rep, target_fdr = 0.05)
 cutoff <- fdr$cutoff
 
 bind_rows(
@@ -179,7 +178,7 @@ bind_rows(
   geom_histogram(alpha = 0.5, position = "identity", bins = 40, na.rm = TRUE) +
   geom_vline(xintercept = cutoff, linetype = "dashed") +
   labs(x = "Pearson correlation", y = "scaled density", fill = NULL,
-       title = sprintf("Isotope cutoff = %.2f (FDR = %.0f%%)", cutoff, 100 * 0.10))
+       title = sprintf("Isotope cutoff = %.2f (FDR = %.0f%%)", cutoff, 100 * 0.50))
 ```
 
 Keep candidate pairs above the cutoff and resolve isotope groups as connected components (so an M+0/M+1/M+2 envelope becomes one group). Every feature gets a `group_id`; unmatched features are singletons.
@@ -258,7 +257,7 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 
 ### Code to recreate figures and tables
 
-```{r, results='hide', warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE}
 mse_pp <- readMSIData(file.path("Data", "Preprocessing", "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"),
   verbose = F)
 cat("After Peak Picking ",length(mz(mse_pp)), "\n")
@@ -267,7 +266,7 @@ bg_mz_approx <- c(1570.6763, 1571.6790, 1572.6831, 1592.6613, 1593.6630, 1594.66
 cat("After dropping internal standard ions [-6]) ", length(mz(mse_pp))-length(bg_mz_approx), "\n")
 
 mse_pre_filt <- readMSIData(COMBINED_DATA_PATH)
-other_ions_in_roi_selection <- c(1141.5556, 1142.5732, 1608.631)
+other_ions_in_roi_selection <- c(1141.585, 1142.5732, 1608.631)
 cat("After dropping other ions used in ROI selection [-3] and before NS filtering ",
   length(mz(mse_pre_filt)) - length(other_ions_in_roi_selection),"\n")
 
@@ -286,10 +285,10 @@ cat("After cartilage sparsity filtering ", length(mz(mse_cart_filtered)), "\n")
 ```
 
 
-```{r, results='hide', warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE}
 cat("Table S3\n")
 cat("Approximate m/z of preselected features used to segment cartilage (and isotopes/spatial analogs): ", 
-  paste(round(c(1141.585, 1142.585),3), collapse = ", "), "\n")
+  paste(round(c(1141.585, 1142.5732),3), collapse = ", "), "\n")
 cat("Approximate m/z of preselected features used to segment background (and isotopes/spatial analogs): ", 
   paste(round(c(1570.6763, 1571.6790, 1572.6831, 1592.6613, 1593.6630, 1594.6662, 1608.631),3), collapse = ", "), "\n")
 cat("Approximate m/z of features removed by non-specific filtering: ", 
@@ -302,14 +301,15 @@ cat("Approximate m/z features part of 2-member isotope groups: ",
   paste(round(iso_merged |> group_by(group_id) |> filter(n() == 2) |> pull(mz),3), collapse = ", "), "\n")
 cat("Approximate m/z features part of 3-member isotope groups: ", 
   paste(round(iso_merged |> group_by(group_id) |> filter(n() == 3) |> pull(mz),3), collapse = ", "), "\n")
-
+cat("Approximate m/z features part of 4-member or more isotope groups: ", 
+  paste(round(iso_merged |> group_by(group_id) |> filter(n() >= 4) |> pull(mz),3), collapse = ", "), "\n")
 cat("Approxiamte m/z features dropped during Cartilage ROI sparsity filtering: ", 
   paste(round(setdiff(mz(mse_deiso), mz(mse_cart_filtered)),3), collapse = ", "), "\n")
 
 ```
 
 
-```{r, results='hide', warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE}
 knitr::kable(
   iso_merged |>
     group_by(group_id) |>
@@ -322,19 +322,32 @@ knitr::kable(
       .groups = "drop"
     )
 )
-
-m <- subsetPixels(mse_ns_filt, mse_ns_filt$run == "6891-OA-lateral")
+m <- mse_pre_filt |> 
+    subsetFeatures(mz %in% mz(mse_ns_filt)) |>
+    subsetPixels(mse_pre_filt$run == "6891-OA-lateral")
 
 jl_3 <- sort(unique(iso_merged |> group_by(group_id) |>
   mutate(n = n()) |> ungroup() |> filter(n == 3) |> pull(group_id)))
 
-id_1 <- iso_merged |> filter(group_id %in% c(258)) |> pull(feature_id)
-id_2 <- iso_merged |> filter(group_id %in% c(312)) |> pull(feature_id)
-id_3 <- iso_merged |> filter(group_id %in% c(566)) |> pull(feature_id)
+#all
+#image_png(m, i = iso_merged |> filter(group_id %in% jl_3) |> pull(feature_id), scale = T,
+#style = "dark", bg="black", key = F, grid = F, pointsize = 36, superpose = F, filename="tmp/all_3mbisos.png", 
+#      width = 1500,
+#      height = 100 + (300 * length(jl_3)),
+#      layout = c(length(jl_3),3),
+#      xaxt = "n",
+#      yaxt = "n",
+#      ylab = NA,
+#      xlab = NA)
+
+
+id_1 <- iso_merged |> filter(group_id %in% c(19)) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id %in% c(114)) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id %in% c(131)) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-3-isotope-sii.png"), width = 1500, height = 900, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3]), 
-      scale = F, 
+      scale = T, 
       superpose = F, 
       layout = c(3,3), 
       key = F, 
@@ -345,15 +358,27 @@ image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_
       xlab = NA)
 dev.off()
 
-######### 38, 41, 45, 50, 65
+######### 2, 7, 15, 20, 25, 33
 jl <- sort(unique(iso_merged |> group_by(group_id) |> mutate(n = n()) |> ungroup() |> filter(n == 2) |> pull(group_id)))
-id_1 <- iso_merged |> filter(group_id == jl[3]) |> pull(feature_id)
-id_2 <- iso_merged |> filter(group_id == jl[6]) |> pull(feature_id)
-id_3 <- iso_merged |> filter(group_id == jl[11]) |> pull(feature_id)
+
+#all
+image_png(m, i = iso_merged |> filter(group_id %in% jl) |> pull(feature_id), scale = T,
+style = "dark", bg="black", key = F, grid = F, pointsize = 36, superpose = F, filename="tmp/all_2mbisos.png", 
+      width = 1500,
+      height = 100 + (300 * length(jl)),
+      layout = c(length(jl),2),
+      xaxt = "n",
+      yaxt = "n",
+      ylab = NA,
+      xlab = NA)
+
+id_1 <- iso_merged |> filter(group_id == jl[2]) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id == jl[4]) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id == jl[10]) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-2-isotope-sii.png"), width = 1500, height = 700, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]), 
-      scale = F, 
+      scale = T, 
       superpose = F, 
       layout = c(2,3), 
       key = F, 
@@ -363,11 +388,9 @@ image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]),
       ylab = NA,
       xlab = NA)
 dev.off()
-
-
 ```
 
-```{r, results='hide', warning=FALSE, message=FALSE}
+```{r, warning=FALSE, message=FALSE}
 
 paste0(iso_merged |>
          group_by(group_id) |>
@@ -387,4 +410,9 @@ paste0(iso_merged |>
          ungroup() |> filter(n == 3) |> mutate(mzr = round(mz, 4)) |> pull(mzr),
        collapse = ", ")
 
+paste0(iso_merged |>
+         group_by(group_id) |>
+         mutate(n = n()) |>
+         ungroup() |> filter(n >= 4) |> mutate(mzr = round(mz, 4)) |> pull(mzr),
+       collapse = ", ")
 ```
