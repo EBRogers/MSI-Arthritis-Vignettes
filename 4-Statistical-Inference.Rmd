@@ -302,9 +302,8 @@ signift_cartilage |>
 signift_cartilage |> 
   filter(contrast == "lateral_vs_medial_in_osteoarthritis") |>
   mutate(feature_id = as.integer(feature_id)) |>
-  left_join(passed |> 
-            mutate(feature_id = as.integer(fid),
-                   mz = mz(m)[passed$fid])) |>
+  left_join(passed |>
+            mutate(feature_id = as.integer(fid))) |>
   mutate(`M/Z` = round(mz, 3),
           Estimate = round(estimate, 3),
           Std.Error = round(SE, 3),

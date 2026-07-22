@@ -45,15 +45,15 @@ load(file.path("Outputs", "cartilage_results.RData"))
 load(file.path("Outputs", "signift_cartilage.RData"))
 
 
-model_fit_eval <- read_csv(file.path("Outputs", "feature-model-fit-evaluation.csv"), show_col_types = FALSE) |> 
-  mutate(across(qq_normality:outliers, as.factor))
+model_fit_eval <- read_csv(file.path("Outputs", "feature-model-fit-evaluation-utd.csv"), show_col_types = FALSE) |> 
+  mutate(across(qq:outliers, as.factor))
 
 passed <- model_fit_eval |> 
-  filter(qq_normality == "OK" & 
-           residual_variance == "OK" & 
-           outliers == "OK")
+  filter(qq == "ok" & 
+           var == "ok" & 
+           outliers == "ok")
 
-cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
+cartilage_models_OK_fit <- cartilage_res[[1]][passed$fid]
 ```
 
 # Extract planning quantities from the fitted models
@@ -61,7 +61,7 @@ cartilage_models_OK_fit <- cartilage_res[[1]][passed$feature_id]
 Mixed effects models separate variation attributable to subjects (biological variation) from residual variation. Models estimate variance components, but as what we care about for future experiments is the detection of differences, i.e., the power of the tests (not the models), standard errors are what we will focus on. Standard errors are the variances of the estimates of differences, such as our hypotheses. Some hypotheses have multiple sources of variance, like those looking at differences between groups composed of different subjects.
 
 - **In Medial: Osteoarthritis vs Control** is a between-subject comparison, so both subject-level and residual variation contribute.
-- **In Osteoarthritis: Medial vs Lateral** is a within-subject comparison, so each subject acts as their own control. Therefore, the sinal must only overcome the residual (remaining, technical) variation. 
+- **In Osteoarthritis: Medial vs Lateral** is a within-subject comparison, so each subject acts as their own control. Therefore, the signal must only overcome the residual (remaining, technical) variation.
 
 To obtain stable planning values, we can summarize the variance components across adequately fit features and use their median. We will also compute a typical reference mean estimate so that differences on the intensity scale can be expressed as percent differences, which are easier to interpret. We will also fix the power at 0.9 and the target FDR at 0.05. As you can see, there are many assumptions and "degrees of freedom" in these calculations. Using median variance estimates (as opposed to means) helps reduce the effect of very high or very low values. Additionally, in targeted future experiments that care about a single analyte, we can use the variances from a single model.
 
@@ -94,7 +94,7 @@ calc_sample_size <- function(desired_difference,
                              alpha,
                              power,
                              variance_estimate_without_I) {
-  delta <- seq(desired_difference[1], desired_difference[2], 0.1)
+  delta <- seq(desired_difference[1], desired_difference[2], 0.001)
   z_alpha <- qnorm(1 - alpha / 2)
   z_beta <- qnorm(power)
   aa <- z_alpha + z_beta
@@ -126,38 +126,41 @@ comparison_labels <- c("In Osteoarthritis: Medial vs Lateral",
 The between-subject comparison uses `2*(median.sigma.error + median.sigma.subject)`, whereas the within-subject comparison uses `2*(median.sigma.error)`. This reflects the fact that pairing within subject removes some of the variation that would otherwise inflate the required sample size.
 
 ```{r build-power-curves}
+delta_min <- 0.001
+delta_max <- 1
+
 df_curves <- bind_rows(
-  calc_sample_size(c(1, 150),
+  calc_sample_size(c(delta_min, delta_max),
                    alpha_90,
                    power,
                    2 * (median.sigma.error + median.sigma.subject)) |>
     mutate(id = "Condition", n_sig_test = 90),
 
-  calc_sample_size(c(1, 150),
+  calc_sample_size(c(delta_min, delta_max),
                    alpha_90,
                    power,
                    2 * (median.sigma.error)) |>
     mutate(id = "Subsection", n_sig_test = 90),
 
-  calc_sample_size(c(1, 150),
+  calc_sample_size(c(delta_min, delta_max),
                    alpha_50,
                    power,
                    2 * (median.sigma.error + median.sigma.subject)) |>
     mutate(id = "Condition", n_sig_test = 50),
 
-  calc_sample_size(c(1, 150),
+  calc_sample_size(c(delta_min, delta_max),
                    alpha_50,
                    power,
                    2 * (median.sigma.error)) |>
     mutate(id = "Subsection", n_sig_test = 50),
 
-  calc_sample_size(c(1, 150),
+  calc_sample_size(c(delta_min, delta_max),
                    alpha_1,
                    power,
                    2 * (median.sigma.error + median.sigma.subject)) |>
     mutate(id = "Condition", n_sig_test = 1),
 
-  calc_sample_size(c(1, 150),
+  calc_sample_size(c(delta_min, delta_max),
                    alpha_1,
                    power,
                    2 * (median.sigma.error)) |>
@@ -193,7 +196,7 @@ ggplot(df_curves,
   ylim(0, 20) +
   labs(color = "Comparison") +
   theme(legend.position = "bottom") +
-  scale_x_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0.11, 0.5)) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0.16, 0.65)) + #
   scale_color_manual(values = greys) +
   guides(color = guide_legend(order = 1, nrow = 2,
                               theme = theme(legend.title.position = "top")),

@@ -259,27 +259,33 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 ```{r, warning=FALSE, message=FALSE}
 mse_pp <- readMSIData(file.path("Data", "Preprocessing", "Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML"),
   verbose = F)
-cat("After Peak Picking ",length(mz(mse_pp)), "\n")
-
-bg_mz_approx <- c(1570.6763, 1571.6790, 1572.6831, 1592.6613, 1593.6630, 1594.6662)
-cat("After dropping internal standard ions [-6]) ", length(mz(mse_pp))-length(bg_mz_approx), "\n")
-
 mse_pre_filt <- readMSIData(COMBINED_DATA_PATH)
-other_ions_in_roi_selection <- c(1141.585, 1142.5732, 1608.631)
-cat("After dropping other ions used in ROI selection [-3] and before NS filtering ",
-  length(mz(mse_pre_filt)) - length(other_ions_in_roi_selection),"\n")
-
 mse_ns_filt <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered.imzML"),
   verbose = F)
-cat("After NS filtering ",length(mz(mse_ns_filt)),"\n")
-
 mse_deiso <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated.imzML"),
   verbose = F)
-cat("After deiso ",length(mz(mse_deiso)),"\n")
-
 mse_cart_filtered <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"),
   verbose = F)
-cat("After cartilage sparsity filtering ", length(mz(mse_cart_filtered)), "\n")
+
+# Count feature drops dynamically at each stage, so the narrative stays correct
+# regardless of how many ions each step removes.
+n_pp    <- length(mz(mse_pp))
+n_norm  <- length(mz(mse_pre_filt))
+n_ns    <- length(mz(mse_ns_filt))
+n_deiso <- length(mz(mse_deiso))
+n_cart  <- length(mz(mse_cart_filtered))
+
+# ROI-selection ions still present in the normalized image that are dropped in this vignette
+n_roi_dropped <- sum(round(mz(mse_pre_filt), 3) %in% round(rounded_mz_of_ROI_segmentation_ions, 3))
+n_pre_ns <- n_norm - n_roi_dropped  # after dropping ROI ions, before NS filtering
+
+cat("After Peak Picking ", n_pp, "\n")
+cat("After dropping internal standard ions [-", n_pp - n_norm, "] ", n_norm, "\n", sep = "")
+cat("After dropping other ions used in ROI selection [-", n_roi_dropped,
+  "] and before NS filtering ", n_pre_ns, "\n", sep = "")
+cat("After NS filtering [-", n_pre_ns - n_ns, "] ", n_ns, "\n", sep = "")
+cat("After deiso [-", n_ns - n_deiso, "] ", n_deiso, "\n", sep = "")
+cat("After cartilage sparsity filtering [-", n_deiso - n_cart, "] ", n_cart, "\n", sep = "")
 
 ```
 
@@ -290,8 +296,8 @@ cat("Approximate m/z of preselected features used to segment cartilage (and isot
   paste(round(c(1141.585, 1142.5732),3), collapse = ", "), "\n")
 cat("Approximate m/z of preselected features used to segment background (and isotopes/spatial analogs): ", 
   paste(round(c(1570.6763, 1571.6790, 1572.6831, 1592.6613, 1593.6630, 1594.6662, 1608.631),3), collapse = ", "), "\n")
-cat("Approximate m/z of features removed by non-specific filtering: ", 
-  paste(setdiff(round(setdiff(mz(mse_pre_filt), mz(mse_ns_filt)),3), round(other_ions_in_roi_selection, 3)), collapse = ", "), "\n")
+cat("Approximate m/z of features removed by non-specific filtering: ",
+  paste(setdiff(round(setdiff(mz(mse_pre_filt), mz(mse_ns_filt)),3), round(rounded_mz_of_ROI_segmentation_ions, 3)), collapse = ", "), "\n")
 
 cat("Table S4\n")
 cat("Approximate single ion m/z features: ", 
@@ -302,7 +308,7 @@ cat("Approximate m/z features part of 3-member isotope groups: ",
   paste(round(iso_merged |> group_by(group_id) |> filter(n() == 3) |> pull(mz),3), collapse = ", "), "\n")
 cat("Approximate m/z features part of 4-member or more isotope groups: ", 
   paste(round(iso_merged |> group_by(group_id) |> filter(n() >= 4) |> pull(mz),3), collapse = ", "), "\n")
-cat("Approxiamte m/z features dropped during Cartilage ROI sparsity filtering: ", 
+cat("Approximate m/z features dropped during Cartilage ROI sparsity filtering: ",
   paste(round(setdiff(mz(mse_deiso), mz(mse_cart_filtered)),3), collapse = ", "), "\n")
 
 ```

@@ -840,11 +840,7 @@ bg_mz_approx <- c(1570.6763,
                   1594.6662, 
                   1608.631)
 
-bg_isos_mz_approx <- bg_mz_approx[2:7]
-
-bg_idx <- features(m, mz=bg_mz_approx) 
-
-bg_idx_isos <- features(m, mz=bg_isos_mz_approx) 
+bg_idx <- features(m, mz=bg_mz_approx)
 ```
 
 ```{r}
@@ -893,7 +889,7 @@ m <- subsetPixels(m, qc$nnz >= 100 & qc$tic >= qc$lo & qc$tic <= qc$hi)
 
 ```{r}
 normalized <- m |>
-        normalize(method = "tic", scale = 1000) |>
+        normalize(method = "tic") |>
         process(BPPARAM=SnowfastParam(workers = 5L)) |>
         summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"),
           na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |>

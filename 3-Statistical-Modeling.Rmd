@@ -527,7 +527,7 @@ Each plot can offer us some understanding of the fit of the model to our data.
 (C) **Single ion images of each sample:** We can observe generally high sparsity, and low overall intensity. Some samples are very sparse.
 (D) **Residual variance boxplots by independent variable:** Both show signs of unequal variance, especially between conditions.
 
-Here is the manual part: as we only have `r length(fids)` models, we can manually diagnose assumption fit for each one using the set of plots in the `./QQ-Itx-SII-Plots` directory. I (the author) have done this manual classification myself, and added my determinations to `Outputs/feature-model-fit-evaluation.csv`. We will refrain from testing our hypotheses on models with poor fit, as we can no longer be sure the tests will yield accurate results.
+Here is the manual part: as we only have `r length(fids)` models, we can manually diagnose assumption fit for each one using the set of plots in the `./QQ-Itx-SII-Plots` directory. I (the author) have done this manual classification myself, and added my determinations to `Outputs/feature-model-fit-evaluation-utd.csv`. We will refrain from testing our hypotheses on models with poor fit, as we can no longer be sure the tests will yield accurate results.
 
 To demonstrate common QQ plot shapes, and especially, what is considered "Normal" with only 16 samples, we can simulate plots below.
 
