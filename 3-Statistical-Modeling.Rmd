@@ -407,7 +407,7 @@ itx_fancy <- function(tmp_df){
 
 This code will generate a set of plots for every model, saving them in the `./QQ-Itx-SII-Plots` directory.
 ```{r}
-for (f in fids[685]) {
+for (f in fids) {
 
 tmp_df <- qq_plot_frame |> filter(feature_id == f)
 
