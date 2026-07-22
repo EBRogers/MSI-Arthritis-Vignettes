@@ -856,7 +856,7 @@ Sparsity of pixels and features is ubiquitous in MSI. Sparsity is generally a mi
 
 ## Preparing spectra for normalization
 
-We will use total ion current (TIC) normalization, which scales each spectrum by its summed intensity. This assumes that the total amount of ionized material is comparable across pixels, so that differences in overall signal reflect nuisance variation rather than biology. Like other global-constant methods, TIC is sensitive to sparse and outlier pixels, which we address with a per-pixel filter below.
+We will use total ion current (TIC) normalization, which scales each spectrum by its summed intensity. This assumes that the total amount of ionized material is comparable across pixels, so that differences in overall signal reflect nuisance variation rather than biology. We rescale the normalized spectra to the median per-pixel TIC, which keeps intensities on an interpretable scale comparable to the raw data (left unset, Cardinal scales instead to the number of features). Like other global-constant methods, TIC is sensitive to sparse and outlier pixels, which we address with a per-pixel filter below.
 
 We will attach the ROI labels to each pixel for use in later steps. The tissue zones are not subset here - normalization is applied to the full dataset, and tissue areas are subset in downstream steps.
 
@@ -888,8 +888,10 @@ m <- subsetPixels(m, qc$nnz >= 100 & qc$tic >= qc$lo & qc$tic <= qc$hi)
 ```
 
 ```{r}
+tic_scale <- median(pData(m)$tic, na.rm = TRUE)
+
 normalized <- m |>
-        normalize(method = "tic") |>
+        normalize(method = "tic", scale = tic_scale) |>
         process(BPPARAM=SnowfastParam(workers = 5L)) |>
         summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"),
           na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |>

@@ -94,7 +94,7 @@ calc_sample_size <- function(desired_difference,
                              alpha,
                              power,
                              variance_estimate_without_I) {
-  delta <- seq(desired_difference[1], desired_difference[2], 0.001)
+  delta <- seq(desired_difference[1], desired_difference[2], 0.1)
   z_alpha <- qnorm(1 - alpha / 2)
   z_beta <- qnorm(power)
   aa <- z_alpha + z_beta
@@ -126,8 +126,8 @@ comparison_labels <- c("In Osteoarthritis: Medial vs Lateral",
 The between-subject comparison uses `2*(median.sigma.error + median.sigma.subject)`, whereas the within-subject comparison uses `2*(median.sigma.error)`. This reflects the fact that pairing within subject removes some of the variation that would otherwise inflate the required sample size.
 
 ```{r build-power-curves}
-delta_min <- 0.001
-delta_max <- 1
+delta_min <- 1
+delta_max <- 100
 
 df_curves <- bind_rows(
   calc_sample_size(c(delta_min, delta_max),

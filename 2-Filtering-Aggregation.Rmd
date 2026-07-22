@@ -36,6 +36,11 @@ library(Cardinal)
 source(file.path("Utilities.R"))
 source(file.path("IsotopeUtilities.R"))
 
+# Fix the RNG kind so the isotope decoy sampling (and thus the FDR cutoff and
+# final feature count) is reproducible regardless of how this vignette is
+# launched. Matches 1-Preprocessing; without it a standalone run defaults to
+# Mersenne-Twister and yields a different feature count.
+RNGkind("L'Ecuyer-CMRG")
 
 setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
@@ -353,7 +358,7 @@ id_3 <- iso_merged |> filter(group_id %in% c(jl_3[34])) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-3-isotope-sii.png"), width = 1500, height = 900, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3]), 
-      scale = T, 
+      scale = F, 
       superpose = F, 
       layout = c(3,3), 
       key = F, 
@@ -384,7 +389,7 @@ id_3 <- iso_merged |> filter(group_id == jl[36]) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-2-isotope-sii.png"), width = 1500, height = 700, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]), 
-      scale = T, 
+      scale = F, 
       superpose = F, 
       layout = c(2,3), 
       key = F, 
