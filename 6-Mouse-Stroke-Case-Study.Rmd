@@ -49,6 +49,11 @@ recalib.data.path <- file.path(preprocessing.data.path,"Recalibrated")
 aligned.data.path <- file.path(preprocessing.data.path,"Aligned")
 
 outputs.path <- file.path("Outputs")
+
+RNGkind("L'Ecuyer-CMRG")
+
+setCardinalVerbose(verbose = FALSE)
+gcinfo(verbose = FALSE)
 ```
 
 ## Load metadata
@@ -370,9 +375,6 @@ for (i in 1:length(mz(normalized))) {
 writeMSIDataSafe(normalized, file.path(preprocessing.data.path, "IS-normalized.imzML"))
 ```
 
-```{r}
-knitr::knit_exit()
-```
 
 # ANALYSIS: between stroke day conditions
 
@@ -761,68 +763,7 @@ for (f in fids) {
 
 
 # Step 4: Statistical inference
-
 ```{r}
-
-ct <- contrastTest(mt, specs= ~ day * tissue, 
-                      method="pairwise")
-
-topFeatures(ct) |> 
-    as_tibble() |>
-    ggplot(aes(x = `day28...day7.estimate`, y = -log(`day28...day7.fdr`))) +
-    geom_point(aes(color = `day28...day7.fdr` < 0.05), alpha = 0.5)
-
-vol <- NULL
-for (i in 1:length(mt)) {
-    td <- tidy(mt[[i]])
-    vol <- rbind(vol,
-        tibble(i = i, est.ref = td$estimate[1], est.eff = td$estimate[2], pct.delta = (td$estimate[1] - sum(td$estimate))/sum(td$estimate), p.value = td$p.value[[2]])
-    )
-}
-
-library(ggrepel)
-
-vol |> 
-mutate(fid = row_number(),
-        mz = round(mz(modeling.mse), 4)) |>
-left_join(lcms.peaks |> mutate(mz = round(`Input Mass`, 4))) |>
-mutate(fdr = p.adjust(p.value, method = "fdr")) |>
-ggplot(aes(x = pct.delta*100, y = -log(fdr))) +
-    geom_point(aes(color = fdr < 0.01), alpha = 0.5) +
-    geom_text_repel(
-        data = ~ slice_min(.x, fdr, n = 25, with_ties = FALSE),
-        aes(label = `LIPID MAPS`),
-        size = 3, max.overlaps = Inf
-    ) +
-    labs(x = "In stroke: 7 Days - 28 Days, percent difference from 7 days")
-
-```
-
-
-```{r}
-# ==============================================================================
-# Statistical inference (volcano plots) and future-experiment design
-# (power curves) for a day * tissue mixed-effects MSI experiment.
-#
-# Hypothesis testing uses Cardinal::contrastTest (vignette 4, "Method 1").
-#
-# Verified design (mt = MeansTest, 125 features):
-#   intensity ~ day + tissue + day:tissue + (1 | subject)
-#     day    : "7" (ref), "28"            -> BETWEEN-subject (5 subjects/day group)
-#     tissue : "cortexwm" (ref), "stroke" -> WITHIN-subject  (both tissues/subject)
-#
-# Hypotheses (both are pairwise contrasts already present in contrastTest output):
-#   H1  In stroke:  day7 - day28      == "day7 stroke - day28 stroke"      (between)
-#   H2  In day28:   cortexwm - stroke == "day28 cortexwm - day28 stroke"   (within)
-#
-# Planning variance inputs (medians across the 125 features):
-#   median sigma2_subject ~ 851.6,  median sigma2_residual ~ 3566.9
-#   (mt[[1]] is a high-variance outlier at 9203 / 20814.)
-#
-# Style mirrors:
-#   .../4-Statistical-Inference.html  and  .../5-Designing-Future-Experiments.html
-# ==============================================================================
-
 library(tidyverse)
 library(Cardinal)
 library(lmerTest)   # provides fixef()/VarCorr() for the reference means & variances
@@ -834,11 +775,6 @@ lab_h2 <- "In day 28: cortexwm - stroke"   # within-subject
 # Exact contrast names as emitted by contrastTest (see your ct[[1]] output).
 name_h1 <- "day7 stroke - day28 stroke"
 name_h2 <- "day28 cortexwm - day28 stroke"
-
-
-# ==============================================================================
-# PART 1 -- STATISTICAL INFERENCE via Cardinal::contrastTest
-# ==============================================================================
 
 # Run all pairwise contrasts (or reuse the `ct` you already computed).
 ct <- contrastTest(mt, specs = ~ day * tissue, method = "pairwise")
@@ -910,7 +846,7 @@ signift_stroke |>
   )
 
 ggsave(file.path("Recreated-Figures", "Figure-Stroke-Volcano.png"),
-       height = 5.75, width = 6, units = "in")
+       height = 5.75, width = 4, units = "in")
 
 # ---- (Optional) unadjusted p-value distributions (SI, as in vignette 4) ------
 signift_stroke |>
@@ -924,11 +860,11 @@ signift_stroke |>
         strip.background = element_rect(fill = "white", color = "black"),
         strip.text = element_text(face = "bold"))
 
+```
 
-# ==============================================================================
-# PART 2 -- DESIGNING FUTURE EXPERIMENTS: power / sample-size curves
-# (adapts vignette 5; variance-component extraction, not hypothesis testing)
-# ==============================================================================
+
+# Step 5: Designing future experiments
+```{r}
 
 df_var <- bind_rows(lapply(seq_len(length(mt)), function(i) {
   m  <- mt[[i]]
@@ -1006,7 +942,7 @@ ggplot(df_curves, aes(x = pct, y = numSample, color = comparison)) +
                         name = "Multiple Testing Correction") +
   scale_color_manual(values = greys) +
   scale_x_continuous(labels = scales::percent_format(accuracy = 1),
-                     limits = c(0.02, 0.35)) +
+                     limits = c(0.1, 0.60)) +
   ylim(0, 20) +
   labs(x = "Absolute Value of Anticipated Percent Difference of Mean Intensities",
        y = "Minimum Number of Biological Replicates",
@@ -1029,329 +965,3 @@ df_curves |>
   mutate(Percent_Change = pct * 100) |>
   knitr::kable()
 ```
-
-
-
-
-# Step 5: Designing future experiments
-
-# ANALYSIS: between stroke day conditions
-
-# Step 2: Filtering and aggregation
-## Non-specific Filtering
-
-```{r}
-normalized <- readMSIData(file.path(preprocessing.data.path, "IS-normalized.imzML"))
-
-intensity(normalized) = as.matrix(intensity(normalized))
-```
-
-Filter marker features and IS
-```{r}
-normalized <- normalized |>
-            subsetFeatures(!isMarker & !isIS)
-```
-
-### Identify low mean and low sd features
-Features in the 10th percentile or less for both mean and sd.
-
-```{r}
-normalized <- normalized |>
-    summarizeFeatures(stat = c("sd", "nnzero", "mean"), na.rm = T, chunkopts = list(nchunks = 1))
-
-mean.sd.p1 <- normalized |>
-    fData() |>
-    as_tibble() |>
-    mutate(fid = row_number()) |>
-    filter(mean < quantile(mean, p = .1) & sd < quantile(sd, p = .1)) |>
-    pull(fid) |>
-    unique()
-```
-
-### Identify features with sparse stroke ROI
-Features with less than 24% nnzero in the stroke ROI of any run.
-
-```{r}
-normalized.stroke <- normalized |>
-    subsetPixels(stroke == T) |>
-    summarizeFeatures(stat = c("sd", "nnzero", "mean"), groups = normalized$run[normalized$stroke == T], na.rm = T, chunkopts = list(nchunks = 1)) 
-
-k_long <- normalized.stroke |>
-    fData() |>
-    as_tibble() |>
-    mutate(fid = row_number()) |>
-    dplyr::rename(mean_all = mean, sd_all = sd, nnzero_all = nnzero) |>
-    pivot_longer(
-        cols = matches("^mouse\\."),
-        names_to = c("run", ".value"),
-        names_pattern = "(mouse\\.\\d+\\.\\d+)\\.(.*)"
-    ) |>
-        mutate(run = stringr::str_replace_all(run, "\\.", "-"))
-
-anyrun.nnzero.lt25 <- k_long |> 
-    left_join(normalized.stroke |>
-        pData() |>
-        as_tibble() |>
-        group_by(run) |>
-        count()
-    ) |>
-    mutate(prop.nnzero = nnzero/n) |>
-    group_by(fid) |>
-    filter(any(prop.nnzero < .25)) |>
-    pull(fid) |>
-    unique()
-
-```
-
-Subset out these features.
-```{r}
-ind.features.drop <- sort(unique(c(anyrun.nnzero.lt25, mean.sd.p1)))
-
-normalized <- normalized |>
-                subsetFeatures(!(1:length(mz(normalized)) %in% ind.features.drop))
-
-```
-
-
-# Step 3: Statistical modeling
-
-## Assign experimental variables
-```{r}
-normalized$day <- factor(sub("mouse-(\\d+)-\\d+", "\\1", normalized$run), levels = c(7, 28))
-
-normalized$rep<- as.factor(sub("mouse-\\d+-(\\d+)", "\\1", normalized$run))
-```
-
-## Subset ROI of interest
-```{r}
-modeling.mse <- normalized |>
-    subsetPixels(stroke == TRUE)
-```
-
-## Specify statisical model and fit with meansTest
-```{r}
-mt <- meansTest(modeling.mse, ~ day, samples = modeling.mse$run)
-```
-
-## Visualize diagnostic plots
-
-### QQ plots
-```{r}
-qq_plot_frame <- NULL
-set.seed(2025)
-for (fid in 1:length(mt)) {
-  model <- mt[[fid]]
-  mf <- model.frame(model)
-  run <- rownames(model.frame(model))
-  rownames(mf) <- NULL
-  qq_plot_frame <- bind_rows(qq_plot_frame,
-                        cbind(tibble(feature_id = fid,
-                               residuals = residuals(model),
-                               fitted = fitted(model),
-                               run = run),
-                               mf))
-} 
-```
-
-```{r}
-qq_plot_frame <-
-  qq_plot_frame |>
-  #mutate(feature_id = as.numeric(feature_id)) |>
-  left_join(
-    tibble(mz = mz(modeling.mse)) |>
-      mutate(feature_id = row_number(),
-             mz = round(mz, 4)),
-    by = join_by("feature_id")
-  ) |>
-  group_by(mz) |>
-  arrange(residuals) |>
-  mutate(
-    samp = residuals,
-    theo = qnorm(ppoints(n()))
-  ) |>
-  ungroup()
-
-fids <- unique(qq_plot_frame$feature_id)
-```
-
-```{r}
-manage_directory("QQ-Itx-SII-Plots-Stroke")
-
-# ---- SII prep (built once) ----
-pdata_sii <- as.data.table(as.data.frame(pData(normalized)))[
-  , .(x, y, run, stroke, hemisphere, day, rep)]
-
-run_levels <- c(paste0("mouse-7-", 1:5), paste0("mouse-28-", 1:5))
-
-mz_lookup <- qq_plot_frame |>
-  dplyr::distinct(feature_id, mz) |>
-  dplyr::arrange(feature_id)
-
-# ---- Annotation lookup: mz (4 dp) -> LIPID MAPS ----
-annot_lookup <- lcms.peaks |>
-  dplyr::transmute(mz = round(`Input Mass`, 4),
-                   lipid = `LIPID MAPS`) |>
-  dplyr::distinct(mz, .keep_all = TRUE)   # first hit if an Input Mass repeats
-
-# ---- Panel C: single-ion images, stroke hemisphere only, vertically stacked ----
-sii <- function(fid, stroke_alpha = 1, nonstroke_alpha = 0.3, gray_nonstroke = FALSE) {
-  target_mz <- mz_lookup$mz[mz_lookup$feature_id == fid]
-  fi   <- which.min(abs(mz(normalized) - target_mz))     # nearest row (exact at 4 dp)
-  vals <- as.numeric(intensity(normalized)[fi, ])        # one intensity per pixel
-
-  df <- copy(pdata_sii)
-  df[, intensity := vals]
-  df <- df[hemisphere == TRUE]                           # stroke hemisphere only
-  df[, run := factor(run, levels = run_levels)]
-
-  common <- list(
-    coord_equal(),
-    theme_void(),
-    facet_wrap(~ run, ncol = 2, dir = "v"),              # col1 = day 7, col2 = day 28
-    scale_fill_viridis_c(option = "turbo", na.value = "#bdbdbd"),
-    theme(legend.position = "bottom",
-          panel.spacing.x = unit(0, "pt"),
-          panel.spacing.y = unit(1, "pt")),
-    labs(fill = "Intensity")
-  )
-
-  if (gray_nonstroke) {
-    df[stroke == FALSE, intensity := NA_real_]           # non-stroke -> gray
-    ggplot(df, aes(x = x, y = -y, fill = intensity)) + geom_raster() + common
-  } else {
-    df[, alpha_val := fifelse(stroke, stroke_alpha, nonstroke_alpha)]
-    ggplot(df, aes(x = x, y = -y, fill = intensity)) +
-      geom_tile(aes(alpha = alpha_val)) +
-      scale_alpha_identity(guide = "none") + common
-  }
-}
-
-# ---- Panel B: intensity by day, larger points + mean marker, no lines ----
-itx_fancy <- function(tmp_df) {
-  jit <- position_jitter(width = 0.08, height = 0, seed = 1)
-  ggplot(tmp_df, aes(x = day, y = intensity, color = day)) +
-    ylab("Intensity") +
-    xlab("Day") +
-    theme_classic() +
-    theme(legend.position = "bottom") +
-    geom_point(position = jit, size = 2.5, alpha = 0.8) +
-    geom_text_repel(aes(label = run), position = jit,
-                    color = "black", size = 2.5,
-                    segment.alpha = 0.3, max.overlaps = Inf,
-                    show.legend = FALSE) +
-    stat_summary(aes(group = day), fun = mean, geom = "point",
-                 shape = 21, size = 6, fill = "white", stroke = 1.5, alpha = 0.6) +
-    labs(color = "Day")
-}
-```
-
-
-
-```{r}
-library(ggpubr)
-library(ggrepel)
-
-for (f in fids[1:5]) {
-
-  tmp_df <- qq_plot_frame |> filter(feature_id == f)
-
-  # A: QQ of residuals (labeled)
-  qqs <- ggplot(tmp_df, aes(theo, samp, color = day)) +
-    geom_point(size = 3, alpha = 0.7) +
-    geom_text_repel(aes(label = run), color = "black", size = 2.5,
-                    segment.alpha = 0.3, max.overlaps = Inf, show.legend = FALSE) +
-    geom_abline(slope = 1, intercept = 0) +
-    labs(x = "Theoretical (Normal) Quantiles", y = "Residual Quantiles", color = "Day") +
-    theme_linedraw() +
-    theme(legend.position = "bottom")
-
-  # D: residual distribution by day (labeled)
-  var_day <- ggplot(tmp_df, aes(y = day, x = residuals)) +
-    geom_boxplot(aes(group = day), outlier.shape = NA, color = "black") +
-    geom_point(aes(color = day), size = 3, alpha = 0.7) +
-    geom_text_repel(aes(label = run), color = "black", size = 2.5,
-                    segment.alpha = 0.3, max.overlaps = Inf, show.legend = FALSE) +
-    labs(x = NULL, y = "Day", color = "Day") +
-    theme_linedraw() +
-    theme(legend.position = "none",
-          axis.text.y = element_text(angle = 90, hjust = 0.5, vjust = 0.5))
-
-  var_boxplots <- annotate_figure(
-      var_day, top = "Distribution of residuals by day", bottom = "Residuals",
-      fig.lab = "D", fig.lab.size = 20, fig.lab.face = "bold") +
-    theme(panel.border = element_rect(colour = "#999999", fill = NA, linewidth = 0.25))
-
-  qqs <- annotate_figure(
-      qqs, top = "Quantile-quantile plots of residuals",
-      fig.lab = "A", fig.lab.size = 20, fig.lab.face = "bold") +
-    theme(panel.border = element_rect(colour = "#999999", fill = NA, linewidth = 0.25))
-
-  boxps <- annotate_figure(
-      itx_fancy(tmp_df), top = "Intensity by day",
-      fig.lab = "B", fig.lab.size = 20, fig.lab.face = "bold") +
-    theme(panel.border = element_rect(colour = "#999999", fill = NA, linewidth = 0.25))
-
-  sii_plot <- annotate_figure(
-      sii(f), top = "Single ion images with stroke ROI highlighted",
-      fig.lab = "C", fig.lab.size = 20, fig.lab.face = "bold") +
-    theme(panel.border = element_rect(colour = "#999999", fill = NA, linewidth = 0.25))
-
-  # bottom caption: m/z + LIPID MAPS annotation
-  this_mz <- round(unique(tmp_df$mz)[1], 4)
-  lipid   <- annot_lookup$lipid[match(this_mz, annot_lookup$mz)]
-  cap <- if (is.na(lipid) || lipid == "") {
-    paste0("Feature: ", round(this_mz, 3), " m/z")
-  } else {
-    paste0("Feature: ", round(this_mz, 3), " m/z   |   ", lipid)
-  }
-
-  # stack the three non-SII charts: B (2) over A (2) over D (1); C beside
-  stacked <- ggarrange(boxps, qqs, var_boxplots, nrow = 3, heights = c(2, 2, 1))
-  ggarr <- ggarrange(stacked, sii_plot, ncol = 2, widths = c(1, 1.2)) |>
-    annotate_figure(bottom = cap)
-
-  ggsave(file.path("QQ-Itx-SII-Plots-Stroke", paste0("QQ-", f, ".png")),
-         plot = ggarr, height = 9, width = 11, units = "in")
-}
-```
-
-
-
-```{r}
-
-ct <- contrastTest(mt, specs="day", 
-                      method="pairwise")
-
-topFeatures(ct) |> 
-    as_tibble() |>
-    ggplot(aes(x = `day28...day7.estimate`, y = -log(`day28...day7.fdr`))) +
-    geom_point(aes(color = `day28...day7.fdr` < 0.05), alpha = 0.5)
-
-vol <- NULL
-for (i in 1:length(mt)) {
-    td <- tidy(mt[[i]])
-    vol <- rbind(vol,
-        tibble(i = i, est.ref = td$estimate[1], est.eff = td$estimate[2], pct.delta = (td$estimate[1] - sum(td$estimate))/sum(td$estimate), p.value = td$p.value[[2]])
-    )
-}
-
-library(ggrepel)
-
-vol |> 
-mutate(fid = row_number(),
-        mz = round(mz(modeling.mse), 4)) |>
-left_join(lcms.peaks |> mutate(mz = round(`Input Mass`, 4))) |>
-mutate(fdr = p.adjust(p.value, method = "fdr")) |>
-ggplot(aes(x = pct.delta*100, y = -log(fdr))) +
-    geom_point(aes(color = fdr < 0.01), alpha = 0.5) +
-    geom_text_repel(
-        data = ~ slice_min(.x, fdr, n = 25, with_ties = FALSE),
-        aes(label = `LIPID MAPS`),
-        size = 3, max.overlaps = Inf
-    ) +
-    labs(x = "In stroke: 7 Days - 28 Days, percent difference from 7 days")
-
-```
-
-# Step 4: Statistical inference
-# Step 5: Designing future experiments

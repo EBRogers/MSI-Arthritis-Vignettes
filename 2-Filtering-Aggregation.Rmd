@@ -36,10 +36,7 @@ library(Cardinal)
 source(file.path("Utilities.R"))
 source(file.path("IsotopeUtilities.R"))
 
-# Fix the RNG kind so the isotope decoy sampling (and thus the FDR cutoff and
-# final feature count) is reproducible regardless of how this vignette is
-# launched. Matches 1-Preprocessing; without it a standalone run defaults to
-# Mersenne-Twister and yields a different feature count.
+
 RNGkind("L'Ecuyer-CMRG")
 
 setCardinalVerbose(verbose = FALSE)
