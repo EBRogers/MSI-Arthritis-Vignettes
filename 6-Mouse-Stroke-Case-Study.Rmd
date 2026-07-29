@@ -620,7 +620,8 @@ annot_lookup <- lcms.peaks |>
   dplyr::distinct(mz, .keep_all = TRUE)
 
 # ---- Panel C: single-ion images; stroke + cortexwm full brightness, other dimmed ----
-sii <- function(fid, roi_alpha = 1, other_alpha = 0.3, gray_other = FALSE) {
+sii <- function(fid, roi_alpha = 1, other_alpha = 0.3, gray_other = FALSE,
+                facet_by_day = FALSE) {
   target_mz <- mz_lookup$mz[mz_lookup$feature_id == fid]
   fi   <- which.min(abs(mz(mse.norm.filt) - target_mz))   # exact at 4 dp
   vals <- as.numeric(intensity(mse.norm.filt)[fi, ])      # one intensity per pixel
@@ -629,19 +630,35 @@ sii <- function(fid, roi_alpha = 1, other_alpha = 0.3, gray_other = FALSE) {
   df[, intensity := vals]
   df[, run := factor(run, levels = run_levels)]
 
+  # Default: 2 x 5 (row = day, col = rep). facet_by_day: 5 x 2 (row = rep, col = day).
+  facet_layer <- if (facet_by_day) {
+    df[, rep := factor(sub("mouse-\\d+-(\\d+)", "\\1", run), levels = 1:5)]
+    df[, day := factor(day, levels = c(7, 28))]
+    facet_grid(rep ~ day, labeller = labeller(day = ~ paste("Day", .x)))
+  } else {
+    facet_wrap(~ run, ncol = 5)                           # row1 = day 7, row2 = day 28
+  }
+
+  if (gray_other) df[tissue == "other", intensity := NA_real_]  # non-ROI -> gray
+
+  # Colorbar shows only the min and max (intermediate ticks are too cramped).
+  rng <- range(df$intensity, na.rm = TRUE)
+
   common <- list(
     coord_equal(),
     theme_void(),
-    facet_wrap(~ run, ncol = 5),                          # row1 = day 7, row2 = day 28
-    scale_fill_viridis_c(option = "turbo", na.value = "#bdbdbd"),
+    facet_layer,
+    scale_fill_viridis_c(option = "turbo", na.value = "#bdbdbd",
+                         limits = rng, breaks = rng,
+                         labels = function(b) format(round(b), big.mark = ",")),
     theme(legend.position = "bottom",
           panel.spacing.x = unit(0, "pt"),
-          panel.spacing.y = unit(1, "pt")),
+          panel.spacing.y = unit(1, "pt"),
+          strip.text.y    = element_blank()),             # no rep row labels
     labs(fill = "Intensity")
   )
 
   if (gray_other) {
-    df[tissue == "other", intensity := NA_real_]          # non-ROI -> gray
     ggplot(df, aes(x = x, y = -y, fill = intensity)) + geom_raster() + common
   } else {
     df[, alpha_val := fifelse(tissue %in% c("stroke", "cortexwm"),
@@ -767,6 +784,7 @@ for (f in fids) {
 library(tidyverse)
 library(Cardinal)
 library(lmerTest)   # provides fixef()/VarCorr() for the reference means & variances
+library(ggrepel)    # for labelling the top volcano points
 
 # Hypothesis labels (facet titles / colour keys / join keys).
 lab_h1 <- "In stroke: day 7 - day 28"      # between-subject
@@ -813,8 +831,17 @@ signift_stroke <- bind_rows(
     left_join(ref_means |> transmute(i, ref = ref_h2), by = "i")
 ) |>
   mutate(pct_delta = estimate / ref,
-         signif_after_fdr_adj = fdr < 0.1) |>   # threshold adjustable
-  arrange(pvalue)
+         signif_after_fdr_adj = fdr < 0.1,      # threshold adjustable
+         # panel order: h1 (between-subject, days in stroke) left, h2 (within-subject) right
+         contrast = factor(contrast, levels = c(lab_h1, lab_h2))) |>
+  arrange(pvalue) |>
+  # attach lipid identities (LIPID MAPS names keyed on the aligned m/z)
+  mutate(lipid = annot_lookup$lipid[match(round(mz, 4), annot_lookup$mz)])
+
+# Top 4 points (smallest p-value) per contrast, for labelling on the volcano.
+volcano_labels <- signift_stroke |>
+  dplyr::filter(!is.na(lipid)) |>
+  dplyr::slice_min(pvalue, n = 2, by = contrast)
 
 # Significant after FDR adjustment, per hypothesis.
 signift_stroke |>
@@ -824,6 +851,10 @@ signift_stroke |>
 signift_stroke |>
   ggplot(aes(x = pct_delta, y = -log10(pvalue), color = signif_after_fdr_adj)) +
   geom_point(alpha = 0.6, size = 2) +
+  geom_text_repel(data = volcano_labels, aes(label = lipid),
+                  color = "black", size = 4, min.segment.length = 0,
+                  max.overlaps = Inf, box.padding = 0.4,
+                  show.legend = FALSE) +
   geom_hline(yintercept = -log10(0.01), linetype = "dashed", color = "gray40") +
   #geom_vline(xintercept = 0, color = "gray80") +
   facet_wrap(~contrast) +
@@ -846,7 +877,7 @@ signift_stroke |>
   )
 
 ggsave(file.path("Recreated-Figures", "Figure-Stroke-Volcano.png"),
-       height = 5.75, width = 4, units = "in")
+       height = 5.75, width = 6, units = "in")
 
 # ---- (Optional) unadjusted p-value distributions (SI, as in vignette 4) ------
 signift_stroke |>
@@ -860,6 +891,39 @@ signift_stroke |>
         strip.background = element_rect(fill = "white", color = "black"),
         strip.text = element_text(face = "bold"))
 
+```
+
+## Single ion images for the most significant ion per comparison
+```{r}
+library(ggpubr)
+
+manage_directory("tmp/Top-Ion-SII-Stroke")
+
+# Most significant ion (smallest p-value) in each contrast.
+top_ion_per_contrast <- signift_stroke |>
+  dplyr::slice_min(pvalue, n = 1, by = contrast)
+
+for (k in seq_len(nrow(top_ion_per_contrast))) {
+
+  row <- top_ion_per_contrast[k, ]
+
+  # map the contrast's m/z back to a feature_id understood by sii()
+  fid <- mz_lookup$feature_id[match(round(row$mz, 4), mz_lookup$mz)]
+
+  cap <- if (is.na(row$lipid) || row$lipid == "") {
+    paste0("Feature: ", round(row$mz, 3), " m/z")
+  } else {
+    paste0(row$lipid, ", ", round(row$mz, 3), " m/z")
+  }
+
+  sii_plot <- annotate_figure(
+      sii(fid, facet_by_day = TRUE),
+      bottom = text_grob(cap, size = 14))
+
+  ggsave(file.path("tmp/Top-Ion-SII-Stroke",
+                   paste0("Top-Ion-SII-", make.names(row$contrast), ".png")),
+         plot = sii_plot, height = 6, width = 3, units = "in")
+}
 ```
 
 
