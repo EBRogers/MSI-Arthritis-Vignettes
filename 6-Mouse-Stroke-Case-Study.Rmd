@@ -1,7 +1,7 @@
 ---
 title: "6-Mouse-Stroke-Case-Study"
 author: "Ethan Rogers"
-date: "06/29/2026"
+date: "07/31/2026"
 output:
   html_document: default
 ---
@@ -21,23 +21,23 @@ local({
 })
 ```
 
-In this vignette we demonstrate the proposed workflow on a case study of mouse brain samples after photothrombotic stroke. These data were obtained from the authors of Wang et al, [2025](https://doi.org/10.1038/s42255-025-01340-8) titled "Spatial quantitative metabolomics enables identification of remote and sustained ipsilateral cortical metabolic reprogramming after stroke". The experimental design is as follows:
+In this vignette we demonstrate the proposed workflow on a case study of mouse brain samples after photothrombotic stroke. These data were obtained from the authors of [Wang et al., 2025](https://doi.org/10.1038/s42255-025-01340-8), "Spatial quantitative metabolomics enables identification of remote and sustained ipsilateral cortical metabolic reprogramming after stroke". The experimental design is as follows:
 
-- 10 mice recieved a photothrombotic stroke in the left cortex under the bregma
-- Randomly assigned to a either 7 days of 28 days recovery group
-- tissue harvested at the recovery timepoint
-- tissue sprayed with matrix and C-13 yeast extracts
-- tissues images via MALDI at 30 um pixel size
-- non-tissue yeast extract + matrix also imaged to separate C-13 yeast lipids from endogenous lipids
-- LC-MS was then perfomed on a subset of the brain samples to annotate peaks
+- 10 mice received a photothrombotic stroke in the left cortex, below bregma
+- Mice were randomly assigned to either a 7 day or a 28 day recovery group
+- Tissue was harvested at the recovery timepoint
+- Tissue was sprayed with matrix and C-13 labeled yeast extracts
+- Tissues were imaged via MALDI at 30 um pixel size
+- Yeast extract and matrix were also imaged without tissue, to separate C-13 yeast lipids from endogenous lipids
+- LC-MS was then performed on a subset of the brain samples to annotate peaks
 
-Because each sample has two hemispheres, we can further expand the design by adding a non-stroke control hemipshere in addition to the stroke hemisphere.
+Because each sample contains two hemispheres, we can expand the design by adding the non-stroke hemisphere as a within-subject control.
 
-We will be testing the following hypitheses:
+We will test the following hypotheses:
 
-Hypothesis A (between subjects): In the stroke-affected tissue, are analytes differentially abundant between 7 and 18 day reovery conditions?
+-   **Hypothesis A**, *between-subjects*: In stroke-affected tissue, are analytes differentially abundant between the 7 and 28 day recovery conditions?
 
-Hypoithesis B (within subjects): In the 28 day condition, are analytes differentially abundance between stroke affected cortex and non-stroke affected white matter?
+-   **Hypothesis B**, *within-subjects*: In the 28 day condition, are analytes differentially abundant between stroke-affected cortex and non-stroke-affected white matter?
 
 # Step 0: Setup
 
@@ -45,7 +45,7 @@ Please follow the directions in vignette `0-Setup.Rmd` to create the environment
 
 # Step 1: Preprocessing
 
-Preprocessing of the stroke dataset differs substantially from that of the Arthtisits case study. Broadly, we will not do peak picking, instead aligning the samples to a list of LC-MS peaks supplied by the authors. Second, we will leverage the multiple yeast internal standards to perfom multi-reference normalization. 
+Preprocessing of the stroke dataset differs substantially from the arthritis case study. First, we will not do peak picking, instead aligning the samples to a list of LC-MS peaks supplied by the authors. Second, we will leverage the multiple yeast internal standards to perform multi-reference normalization.
 
 We will begin by loading packages and data.
 
@@ -65,7 +65,7 @@ source("SpatialUtilities.R")
 # from wd
 data.path <- file.path("Mouse-Stroke-Data")
 raw.data.path <- file.path(data.path ,"Raw")
-preprocessing.data.path <- file.path(data.path ,"Preprocessing")
+preprocessing.data.path <- file.path(data.path ,"Preprocessing-Filtering")
 recalib.data.path <- file.path(preprocessing.data.path,"Recalibrated")
 aligned.data.path <- file.path(preprocessing.data.path,"Aligned")
 
@@ -82,7 +82,7 @@ gcinfo(verbose = FALSE)
 name_tibble <- read_csv(file.path(outputs.path, "mouse_stroke_metadata.csv"), show_col_types = FALSE)
 ```
 
-## Loading data
+## Load data
 We will only load the brain samples.
 
 ```{r}
@@ -90,7 +90,7 @@ samp <- name_tibble |>
     filter(!is.na(days) & !is.na(replicate))
 ```
 
-We will reorient brains to be verical and rename the runs for easy file managment.
+We will reorient the brains to be vertical and rename the runs for easier file management.
 
 ```{r}
 msa.raw <- list()
@@ -118,12 +118,12 @@ gc()
 ```
 
 ## Recalibration
-These data do not require baseline removal or smoothing, but most data benefit from recalibration. We will recalibrate to a set of reference peaks esitmated from each sample individually. 
+These data do not require baseline removal or smoothing, but, like most data, benefit from recalibration. We will recalibrate each sample to a set of reference peaks estimated from that sample.
 
-```{r, eval=FALSE}
+```{r}
 bp <- SnowfastParam(workers = 10L, force.GC = T)
 
-for (sn in samp$short_name[3:10]) {
+for (sn in samp$short_name) {
     print(paste("Starting", sn, "\n"))
     est_ref_peaks <- msa.raw[[sn]] |>
 		estimateReferencePeaks(BPPARAM = bp)
@@ -133,17 +133,17 @@ for (sn in samp$short_name[3:10]) {
         writeMSIDataSafe(file.path(recalib.data.path, paste0(sn, ".imzML")))
 }
 
+rm(msa.raw)
 gc()
 ```
 
 ## Peak alignment from known peak list and IS C13 lipids
 
-As mentioned above, the authors performed LC-MS after MALDI aqusition. LC-MS allows for identification of analytes. The authors have included a list of peaks shared between the LC-MS and MALDI aqusitions, subtracting the C-13 yeast analytes, in the supplemental materials. We have supplied it here as `Outputs/LCMSlipids_brain_wang_et_al_nature_metab_2025.csv`. We will skip peak picking and directly align samples to the list of analytes provided along with 8 yeast extract C-13 internal standard lipids for use in normalization later.
+As mentioned above, the authors performed LC-MS after MALDI acquisition, which allows for identification of analytes. Their supplemental materials include a list of peaks shared between the LC-MS and MALDI acquisitions, excluding the C-13 yeast analytes. We have supplied it here as `Outputs/LCMSlipids_brain_wang_et_al_nature_metab_2025.csv`. We will skip peak picking and align samples directly to that list, along with 8 yeast extract C-13 internal standard lipids for use in normalization later.
 
-This does mean our analysis is subject to the preprocessing decisions made by the authors of Wang et al., 2025. For example, the methods and tolerance used to identify peaks shared between MALDI and LC-MS datasets act as a filter of which peaks are retained. By aligning our dataset to these peaks, our results are now reliant on the validty of these methods. True reproduction would require us to perform the same analysis from scratch. As reproduction is not the goal of this work, we will use the peaks provided by the authors to acclerate this analysis. 
+This does mean our analysis inherits the preprocessing decisions made by the authors. For example, the methods and tolerance used to identify peaks shared between the MALDI and LC-MS datasets act as a filter on which peaks are retained. By aligning our dataset to these peaks, our results now rely on the validity of those methods. True reproduction would require us to perform the same analysis from scratch. As reproduction is not the goal of this work, we will use the peaks provided by the authors to accelerate this analysis.
 
-
-To begin, we will load peaks and C13 internal standard lipids from https://doi.org/10.1038/s42255-025-01340-8. We will then combine them togther to get the full set of peaks to align.
+To begin, we will load the peaks and C-13 internal standard lipids from [Wang et al., 2025](https://doi.org/10.1038/s42255-025-01340-8), then combine them into the full set of peaks to align.
 
 ```{r}
 lcms.peaks <- read_csv(file.path(outputs.path, 
@@ -157,8 +157,8 @@ all.peaks.to.align <- sort(c(c13.is.lipids, lcms.peaks$`Input Mass`))
 ```
 
 ### Align each sample individually
-As each sample is being aligned to the same peaks, we can align them individually to reduce memory overhead. 
-```{r, eval=FALSE}
+As each sample is aligned to the same peaks, we can align them individually to reduce memory overhead.
+```{r}
 bp <- SnowfastParam(workers = 8L, force.GC = T)
 
 # load, align, save
@@ -171,17 +171,17 @@ for (sn in samp$short_name) {
 gc()
 ```
 
-Get internal standard indicies of the aligned data. 
+Get the internal standard indices of the aligned data.
 
 ```{r}
 ind.c13.is.lipids <- features(readMSIData(file.path(aligned.data.path, paste0(samp$short_name[1], ".imzML"))),
                                 mz = c13.is.lipids)
 ```
 
-Center, combine, and save aligned images.
+Center, combine, and save the aligned images.
 
 ```{r}
-# keep the original 146 lipids
+# keep everything: the 146 LC-MS lipids plus the 8 C-13 internal standards
 
 mse_list.all <- lapply(samp$short_name, function(short_name){
     m <- readMSIData(file.path(aligned.data.path, paste0(short_name,".imzML")))
@@ -195,10 +195,10 @@ mse.all <- Reduce(cbind, mse_list.all)
 writeMSIDataSafe(mse.all, file.path(preprocessing.data.path, "Analytes-IS-Aligned.imzML"))
 ```
 
-Do the same just for non-is analytes.
+Do the same for the analytes alone.
 
 ```{r}
-# keep the original 146 lipids
+# keep the original 146 lipids, dropping the internal standards
 
 mse_list <- lapply(samp$short_name, function(short_name){
     m <- readMSIData(file.path(aligned.data.path, paste0(short_name,".imzML"))) |>
@@ -214,7 +214,7 @@ mse <- Reduce(cbind, mse_list)
 writeMSIDataSafe(mse, file.path(preprocessing.data.path, "Analytes-Aligned.imzML"))
 ```
 
-And finally just is analytes.
+And finally the internal standards alone.
 
 ```{r}
 # keep the 8 IS lipids
@@ -235,17 +235,20 @@ writeMSIDataSafe(mse.is, file.path(preprocessing.data.path, "IS-Aligned.imzML"))
 
 ## ROI selection
 
-In this work we will define two ROIs per sample: the stoke and a comparable swath of white matter in the opposite hemisphere. 
+In this work we will define two ROIs per sample: the stroke, and a comparable swath of white matter in the opposite hemisphere.
 
+
+`key` below builds a unique run/x/y string for each pixel, which we use to carry
+pixel masks between objects that have been subset differently.
 
 ```{r}
 key <- function(d) paste(d$run, d$x, d$y, sep = "\r")
 ```
 
-### Trim background 
-All MSI samples contain background pixels as well as transitional pixels that bridge the sample edges. Neither background nor transitional pixels contain many sample analytes, but do contain matrix. This combination can substantially increase noise, thus these pixels should be removed. We will do so by using the number of non-zero analytes per pixel as a filter, raising the strictness of the filter when near the edges. `add_edge_factor_mse` is a custom function that adds a factor in `pData` denoting pixels border the edges of the sample, within `r` pixels. Edges are determined by the edges of the coordiante grid. In MALDI, scans are only performed on tissue portions of the aqusition area, thus MS images have irregular edges the roughly follow the tissue area. This is not the case with DESI, thus `add_edge_factor_mse` will not outline tissue in these cases.
+### Trim background
+All MSI samples contain background pixels as well as transitional pixels that bridge the sample edges. Neither background nor transitional pixels contain many sample analytes, but both contain matrix. This combination can substantially increase noise, thus these pixels should be removed. We will do so by using the number of non-zero analytes per pixel as a filter, raising the strictness of the filter near the edges. `add_edge_factor_mse` is a custom function that adds a factor in `pData` denoting pixels that border the edges of the sample, within `r` pixels. Edges are determined by the edges of the coordinate grid. In MALDI, scans are only performed on tissue portions of the acquisition area, thus MS images have irregular edges that roughly follow the tissue area. This is not the case with DESI, thus `add_edge_factor_mse` will not outline tissue in these cases.
 
-We will keep pixels that have greater than 78 non-zero features in non-edge pixels and greater than 88 features in edge pixels. These cutoffs were determined by trial and error. Feature mean and standard deviation can also be used to do this, but we chose to stick to number non-zero for simplicity.
+We will keep pixels with more than 78 non-zero features in non-edge pixels and more than 88 in edge pixels. These cutoffs were determined by trial and error. Feature mean and standard deviation can also be used to do this, but we chose to stick to number non-zero for simplicity. Finally, `drop_pixel_islands_mask_mse` discards any remaining group of 20 or fewer contiguous pixels.
 
 ```{r}
 intensity(mse) <- as.matrix(intensity(mse))
@@ -264,9 +267,9 @@ tissue_mask <- key(pData(mse)) %in% key(pData(mse_subset_trim_islands))
 
 ### Merge annotations from QuPath
 
-Cardinal has tools for manual ROI segmentation (`selectROI`) but these functions are not well supported by the greater R ecosystem. Additionally, standalone tools purpose-build tools for anntation, like QuPath, are better suited for drawing complex and overlapping annotations.
+Cardinal has tools for manual ROI segmentation (`selectROI`), but these functions are not well supported by the greater R ecosystem. Additionally, standalone tools purpose-built for annotation, like QuPath, are better suited for drawing complex and overlapping annotations.
 
-To annotate stroke tissue and non-stoke white matter, we used 834.5273 m/z (PS 40:6) as it has been previously [identified as a marker of white matter](https://doi.org/10.1038/s41598-018-37612-5) in a mouse stroke model. We exported this feature as a raster grid image for each sample, loaded it into QuPath, and made the annotations. We then exported the annotations as GeoJson files and used custom code to transform the QuPath coordiantes back to the Cardinal coordinate system. We could then load the images here from the export CSV. 
+To annotate stroke tissue and non-stroke white matter, we used 834.5273 m/z (PS 40:6), as it has been previously [identified as a marker of white matter](https://doi.org/10.1038/s41598-018-37612-5) in a mouse stroke model. We exported this feature as a raster grid image for each sample, loaded the images into QuPath, and drew the annotations there. We then exported the annotations as GeoJSON files and used custom code to transform the QuPath coordinates back to the Cardinal coordinate system. The result is the CSV loaded below, which labels each pixel by stroke ROI, hemisphere, and cortex white matter ROI.
 
 ```{r}
 annot.qp <- read_csv(file.path(outputs.path, 
@@ -274,7 +277,7 @@ annot.qp <- read_csv(file.path(outputs.path,
                     show_col_types = FALSE)
 ```
 
-Before we proceed, we will verify the coordiantes and runs are all on the same order, then assign pixels annotations.
+Before we proceed, we will verify that the coordinates and runs are all in the same order, then assign the annotations to pixels.
 
 ```{r}
 stopifnot(
@@ -298,14 +301,14 @@ image(mse_subset_trim_islands, "cortexwm")
 
 ### Why not use single ion segmentation?
 
-Sigle ion segmentation creates `k` prespecified segments from the spatial distribution of a single ion. With a marker ion that faithfully denotes (either positiveloy or negatively) biological structures of interest, sigle ion segmentation can be used to programmatically create ROIs without the need of manual segmentation. This process relies heavily on the marker feature being a good marker of the ROI. The white matter is an excellent marker of the stroke tissue, but the areas of healthy white matter are confounded by normal strucutes of the brain such as the ventricals. With prior knowlege, we know these structures are different. But to an algorthim, they may not be easily separable. Therefore, to avoid having to prototype an algorthimic segmentation process that may yield inconsistnat resutls accross tissues, we have done manual segmentaiton. 
+Single ion segmentation creates `k` prespecified segments from the spatial distribution of a single ion. With a marker ion that faithfully denotes (either positively or negatively) biological structures of interest, single ion segmentation can be used to programmatically create ROIs without the need for manual segmentation. This process relies heavily on the marker feature being a good marker of the ROI. The white matter marker delineates the stroke tissue well, but areas of healthy white matter are confounded by normal structures of the brain, such as the ventricles. With prior knowledge, we know these structures are different. To an algorithm, they may not be easily separable. Therefore, rather than prototype an algorithmic segmentation process that may yield inconsistent results across tissues, we have done manual segmentation.
 
 
-### Trim areas with very high internal standard lipid after tissue mask
+### Trim areas with very high internal standard intensity
 
-Matrix and internal standard are sprayed across the entire surface of the sample, thus areas without tissue will minimal ion supression (from tissue ions) and high ionization efficenty from high concentration of matrix relative to other ions. Therefore, very high intensity of internal standards is a likely indicator of non-tissue pixels.
+Matrix and internal standard are sprayed across the entire surface of the sample, thus areas without tissue have minimal ion suppression (from tissue ions) and high ionization efficiency from a high concentration of matrix relative to other ions. Therefore, very high intensity of internal standards is a likely indicator of non-tissue pixels.
 
-Aside from not representing meaningful biology, these areas can bias normalization. We will therefore drop pixels where the mean IS intensity is in the 99th percentile or higher. (Some IS features are very low abundance, therefore we will not include them in our calcualtions)
+Aside from not representing meaningful biology, these areas can bias normalization. We will therefore drop pixels where the mean IS intensity is in the 99th percentile or higher. Some IS features are very low abundance, so we exclude them (mean intensity of 200 or less) from that calculation.
 
 ```{r}
 intensity(mse.is) <- as.matrix(intensity(mse.is))
@@ -325,11 +328,11 @@ is.mask <- mse.is.tmp$mean < quantile(mse.is.tmp$mean, p = .99)
 
 Let's take a look.
 
-```{r, eval=FALSE}
+```{r}
 image(mse.is |> subsetPixels(tissue_mask) , subset = is.mask, i = c(1,4,5,7,8), layout = c(5, 10), key = F, grid = F, style = "dark")
 ```
 
-Now lets save everything.
+Now let's save everything.
 
 ```{r}
 mse.roi.trimmed <- mse_subset_trim_islands |> 
@@ -365,9 +368,9 @@ all(mse.roi.trimmed$y == mse.is.roi.trimmed$y)
 
 ## Normalization
 
-As the stoke dataset contains multiple internal standards, we will use refernece normalization. To recap, the stroke datset was sprayed with a mizxture of C-13 labeled yeast extracts along with the matrix. The authors then chose 8 C-13 lipids, one from each lipid class, as repreentitve ions for normalization. Theoretically, normalixzing each lipid to it's class's representitive C-13 IS would correct for ionization efficenty differences specific to each lipid class; as is what the authors did. For simplicity, we will normalize analytes to the mean of the high-intneisty internal standards.
+As the stroke dataset contains multiple internal standards, we will use reference normalization. To recap, the stroke dataset was sprayed with a mixture of C-13 labeled yeast extracts along with the matrix. The authors then chose 8 C-13 lipids, one from each lipid class, as representative ions for normalization. Theoretically, normalizing each lipid to its class's representative C-13 IS would correct for ionization efficiency differences specific to each lipid class, which is what the authors did. For simplicity, we will instead normalize analytes to the mean of the high-intensity internal standards.
 
-First, we will load the data and label IS and Marker analytes.
+First, we will load the data and label the IS and marker analytes.
 
 ```{r}
 mse.all <- readMSIData(file.path(preprocessing.data.path, "Analytes-IS-Aligned.imzML"))
@@ -378,6 +381,13 @@ mask <- key(pData(mse.all)) %in% key(pData(mse.roi.trimmed))
 
 mse.all.trimmed <- mse.all |>
     subsetPixels(mask)
+
+# the ROI labels are copied across positionally, so lets confirm the pixel order
+stopifnot(
+all(mse.all.trimmed$run == mse.roi.trimmed$run),
+all(mse.all.trimmed$x == mse.roi.trimmed$x),
+all(mse.all.trimmed$y == mse.roi.trimmed$y)
+)
 
 mse.all.trimmed$stroke <- mse.roi.trimmed$stroke
 mse.all.trimmed$hemisphere <- mse.roi.trimmed$hemisphere
@@ -391,7 +401,7 @@ fData(mse.all.trimmed)$isIS <- 1:n.features %in% features(mse.all.trimmed, mz=c1
 fData(mse.all.trimmed)$isMarker <- 1:n.features %in% features(mse.all.trimmed, mz=c(834.5273))
 ```
 
-This custom function below, `normalizeMultipleRefs` normalizes samples to the mean intensity of multiple references.
+The custom function below, `normalizeMultipleRefs`, normalizes each spectrum to the mean intensity of multiple references.
 ```{r}
 normalizeMultipleRefs <- function(object, refs, scale = 1, ...) {
     if ( missing(refs) || is.null(refs) || length(refs) == 0L )
@@ -417,7 +427,7 @@ normalizeMultipleRefs <- function(object, refs, scale = 1, ...) {
 }
 ```
 
-Normalize to the mean of the high-intensity references then scale for comparability.
+Before normalizing, we drop the segmentation marker, so that a feature used to build the ROIs is not carried into analysis, along with the low-intensity internal standards. We then normalize to the mean of the remaining references and rescale for comparability.
 
 ```{r}
 #drop features before normalization
@@ -440,9 +450,9 @@ writeMSIDataSafe(normalized, file.path(preprocessing.data.path, "IS-normalized.i
 
 # Step 2: Filtering and aggregation
 
-Like the Arthtis paper, we will perform non-specific filtering on the feature list to drop low quality analytes. Because we aligned the samples to a set of LC-MS derived peaks, we do not have to perfom clustering and aggregation. There are no isotopes present.
+Like the arthritis case study, we will perform non-specific filtering on the feature list to drop low quality analytes. Because we aligned the samples to a set of LC-MS derived peaks, we do not have to perform clustering and aggregation; the peak list contains no isotopes.
 
-## Non-specific Filtering
+## Non-specific filtering
 
 First, load the data.
 ```{r}
@@ -454,13 +464,14 @@ intensity(normalized) = as.matrix(intensity(normalized))
 Filter out the marker and reference ions.
 
 ```{r}
+# isMarker was already dropped before normalization but lets do it anyway
 normalized <- normalized |>
             subsetFeatures(!isMarker & !isIS)
 ```
 
 ### Identify low mean and low sd features
 
-We will drop features in the 10th percentile or less for both mean and sd.
+We will drop features that are below the 10th percentile in both mean and standard deviation.
 
 ```{r}
 normalized <- normalized |>
@@ -477,7 +488,7 @@ mean.sd.p1 <- normalized |>
 
 
 ### Identify features with sparse stroke and/or cortexwm ROI
-We will drop eatures with less than 25% nnzero in the stroke or cortex white matter ROIs of any run. This will help stabalize the models and mitigate sparsity biasing of ROI means.
+We will drop features that are non-zero in fewer than 25% of pixels in the stroke or cortex white matter ROI of any run. This will help stabilize the models and mitigate sparsity biasing of ROI means.
 
 ```{r}
 normalized.stroke <- normalized |>
@@ -489,7 +500,7 @@ normalized.cortexwm <- normalized |>
     summarizeFeatures(stat = c("sd", "nnzero", "mean"), groups = normalized$run[normalized$cortexwm == T], na.rm = T, chunkopts = list(nchunks = 1)) 
 ```
 
-Compute features for stroke ROI.
+Compute the per-run summaries for the stroke ROI.
 
 ```{r}
 normalized.stroke.features <- normalized.stroke |>
@@ -509,7 +520,8 @@ stroke.anyrun.nnzero.lt25 <- normalized.stroke.features |>
         pData() |>
         as_tibble() |>
         group_by(run) |>
-        count()
+        count(),
+      by = "run"
     ) |>
     mutate(prop.nnzero = nnzero/n) |>
     group_by(fid) |>
@@ -518,7 +530,7 @@ stroke.anyrun.nnzero.lt25 <- normalized.stroke.features |>
     unique()
 ```
 
-Compute features for cortexwm ROI
+And the same for the cortex white matter ROI.
 
 ```{r}
 normalized.cortexwm.features <- normalized.cortexwm |>
@@ -538,7 +550,8 @@ cortexwm.anyrun.nnzero.lt25 <- normalized.cortexwm.features |>
         pData() |>
         as_tibble() |>
         group_by(run) |>
-        count()
+        count(),
+      by = "run"
     ) |>
     mutate(prop.nnzero = nnzero/n) |>
     group_by(fid) |>
@@ -556,14 +569,14 @@ normalized <- normalized |>
 
 ```
 
-Save deataset for modeling.
+Save the dataset for modeling.
 ```{r}
 writeMSIDataSafe(normalized, file.path(preprocessing.data.path, "IS-normalized-filtered.imzML"))
 ```
 
 # Step 3: Statistical modeling
 
-We will use essentally the same model as the Arthtis case study, specificed below:
+We will use essentially the same model as the arthritis case study, specified below:
 
 $$
 Y_{ijk} = \mu + Subject_{i(j)} + Condition_j +  Tissue_k + (Condition \times Tissue)_{jk} + \epsilon_{ijk} \\
@@ -573,17 +586,17 @@ Subject_{i(j)} \overset{iid}{\sim} \mathcal{N}\!\left(0,\sigma^2_{subj}\right),\
 $$
 
 - $Y_{ijk}$: the mean intensity of a feature in the tissue $k$ of subject $i$ from condition $j$
-- $Subject_{i(j)}$: the random effect of subject $i$, nested in condition, where $i = 1, \cdots, I$. It is assumed to indendpent and Normally distributed around 0 with a variance of $\sigma^2_{sub}$
-- $Condition_j$: the fixed effect of condition $j$, where $j = 1, \cdots, J$. In this case, either 7 or 28 days recovery. 
-- $Tissue_k$: the fixed effect of tissue $k$, where $k = 1, \cdots, K$. In this case, either stroke tissue or non-stroke affected white matter. 
+- $Subject_{i(j)}$: the random effect of subject $i$, nested in condition, where $i = 1, \cdots, I$. It is assumed to be independent and Normally distributed around 0 with a variance of $\sigma^2_{subj}$
+- $Condition_j$: the fixed effect of condition $j$, where $j = 1, \cdots, J$. In this case, either 7 or 28 days recovery.
+- $Tissue_k$: the fixed effect of tissue $k$, where $k = 1, \cdots, K$. In this case, either stroke tissue or non-stroke affected white matter.
 - $(Condition \times Tissue)_{jk}$: the fixed effect interaction of condition $j$ and tissue $k$
-- $\epsilon_{ijk}$: the random residual error for observation $ijk$, assumed to be indendpent and Normally distributed around 0 with a variance of $\sigma^2$
+- $\epsilon_{ijk}$: the random residual error for observation $ijk$, assumed to be independent and Normally distributed around 0 with a variance of $\sigma^2$
 
-There are 10 mice evenly split between conditions. Each sample contributes two tissues, so the final number of observations will be 20, with 5 biological replciates per condition, and two replicates per subject.
+There are 10 mice evenly split between conditions. Each sample contributes two tissues, so the final number of observations will be 20, with 5 biological replicates per condition and two observations per subject.
 
 ## Subset ROI of interest
 
-To begin, we will load the preprocessed and fileterd dataset then subset only the stroke and cortex white matter ROIs.
+To begin, we will load the preprocessed and filtered dataset, then subset only the stroke and cortex white matter ROIs.
 
 ```{r}
 modeling.mse <- readMSIData(file.path(preprocessing.data.path, "IS-normalized-filtered.imzML")) |>
@@ -592,7 +605,7 @@ modeling.mse <- readMSIData(file.path(preprocessing.data.path, "IS-normalized-fi
 
 ## Assign experimental variables
 
-Now we will assign experimental variables, beginning with the day and replicate. To communicate to the moldeling software that the replciates are differnt, we must assign them different identifiers.
+Now we will assign the experimental variables, beginning with day and replicate. To communicate to the modeling software that replicate 1 from day 7 is a different mouse from replicate 1 from day 28, we must assign them different identifiers.
 ```{r}
 modeling.mse$day <- factor(sub("mouse-(\\d+)-\\d+", "\\1", modeling.mse$run), levels = c(7, 28))
 
@@ -603,7 +616,7 @@ reps <- as.integer(sub("mouse-\\d+-(\\d+)", "\\1", modeling.mse$run))
 modeling.mse$subject<- as.factor(ifelse(modeling.mse$day == 28, reps, reps + 5))
 ```
 
-Lets do a santiy check that no single pixel is in both stroke and cortex.
+Let's do a sanity check that no single pixel is in both the stroke and cortex white matter ROIs.
 
 ```{r}
 # confirm no overlaps with cortexwm and stroke, should be False
@@ -612,33 +625,37 @@ cat("Any pixels labeled as both cortex white matter AND stroke: ",
     "\n")
 ```
 
-Great, now lets assign ROI (tissue) and sample. Sample is the grouping factor that Cardinal will use to compute the mean intensty (the response variable). We will make that the 
+Now let's assign the ROI (tissue) and sample. Sample is the grouping factor that Cardinal will use to compute the mean intensity, our response variable. Here that is the combination of subject and tissue.
 
 ```{r}
-modeling.mse$tissue <- factor(ifelse(modeling.mse$stroke, "stroke", "cortexwm"),
-                            levels = c("cortexwm", "stroke", "other"))
+# droplevels() so the unobserved "other" level does not enter the model matrix
+# as an all-zero column, which makes the fixed effects rank deficient and adds
+# non-estimable cells to the emmeans grid
+modeling.mse$tissue <- droplevels(
+    factor(ifelse(modeling.mse$stroke, "stroke", "cortexwm"),
+           levels = c("cortexwm", "stroke", "other")))
 
 modeling.mse$samples <- factor(interaction(modeling.mse$subject, modeling.mse$tissue))
 ```
 
-## Specify statisical model and fit with meansTest
+## Specify statistical model and fit with meansTest
 
-Now we will fit the models with `meansTest`. We will use `lmer` for easy testing later.
+Now we will fit the models with `meansTest`, using `lmer` so that we can test contrasts later.
 
 ```{r}
 mt <- meansTest(modeling.mse, ~ day * tissue, ~ 1|subject, samples = modeling.mse$samples, use_lmer = T, na.rm = T)
 ```
 
-
-
 ## Visualize diagnostic plots
 
-Before testing, lets visualize some dianostic plots. The code below will create the following plots for each feature and save them in `QQ-Itx-SII-Plots-Stroke-TissuexDays`
+Before testing, let's visualize some diagnostic plots. The code below will create the following plots for each feature and save them in `QQ-Itx-SII-Plots-Stroke-TissuexDays`.
 
 A) A **quantile-quantile plot** of residuals
-B) An **interaction plot** of mean intensty by condition (color) and tissue (x xis)
-C) **Single ion images** of each analyte, with the non-ROI areas faded out. 
-D) **Box plots** of residual distributions for each fixed effect - condition and tissue.
+B) An **interaction plot** of mean intensity by day (color) and tissue (x axis)
+C) **Single ion images** of each analyte, with the non-ROI areas faded out
+D) **Box plots** of residual distributions for each fixed effect - day and tissue
+
+As in `3-Statistical-Modeling`, these plots are used to manually diagnose how well each model meets its assumptions before we test hypotheses.
 
 ### QQ plots
 ```{r}
@@ -691,12 +708,9 @@ reps <- as.integer(sub("mouse-\\d+-(\\d+)", "\\1", mse.norm.filt$run))
 
 mse.norm.filt$subject<- as.factor(ifelse(mse.norm.filt$day == 28, reps, reps + 5))
 
+
 mse.norm.filt$tissue <- factor(ifelse(mse.norm.filt$stroke, "stroke", ifelse(mse.norm.filt$cortexwm, "cortexwm", "other")),
                             levels = c("cortexwm", "stroke", "other"))
-
-mse.norm.filt$samples <- factor(interaction(mse.norm.filt$subject, mse.norm.filt$tissue))
-# keep in mind that the models are run on just just stroke and cortexwm tissue so 1.other, etc. doesn't exist
-
 
 # ---- SII prep (built once); carry full tissue factor for 3-zone alpha ----
 pdata_sii <- as.data.table(as.data.frame(pData(mse.norm.filt)))[
@@ -709,15 +723,38 @@ mz_lookup <- qq_plot_frame |>
   dplyr::arrange(feature_id)
 
 annot_lookup <- lcms.peaks |>
-  dplyr::transmute(mz = round(`Input Mass`, 4), lipid = `LIPID MAPS`) |>
+  dplyr::transmute(mz = `Input Mass`, lipid = `LIPID MAPS`) |>
   dplyr::distinct(mz, .keep_all = TRUE)
+
+# Aligned m/z are not guaranteed to be identical to the reference masses they
+# were aligned to, so match features back to the LC-MS peak list by nearest m/z
+# within a ppm tolerance rather than on rounded equality
+match_lipid <- function(query_mz, ppm = 20) {
+  vapply(query_mz, function(q) {
+    d <- abs(annot_lookup$mz - q) / q * 1e6
+    j <- which.min(d)
+    if (length(j) == 1L && d[j] <= ppm) annot_lookup$lipid[j] else NA_character_
+  }, character(1))
+}
+
+# report the match rate so a failed join is loud rather than silently all-NA
+cat("Features matched to a LIPID MAPS annotation: ",
+    sum(!is.na(match_lipid(mz_lookup$mz))), " of ", nrow(mz_lookup), "\n", sep = "")
+
+mz_lookup$fi <- vapply(mz_lookup$mz,
+                       function(q) which.min(abs(mz(mse.norm.filt) - q)),
+                       integer(1))
+
+sii_intensity <- as.matrix(intensity(mse.norm.filt)[mz_lookup$fi, , drop = FALSE])
+rownames(sii_intensity) <- as.character(mz_lookup$feature_id)
+
+cat("Single ion image intensities held in memory: ",
+    format(object.size(sii_intensity), units = "auto"), "\n", sep = "")
 
 # ---- Panel C: single-ion images; stroke + cortexwm full brightness, other dimmed ----
 sii <- function(fid, roi_alpha = 1, other_alpha = 0.3, gray_other = FALSE,
                 facet_by_day = FALSE) {
-  target_mz <- mz_lookup$mz[mz_lookup$feature_id == fid]
-  fi   <- which.min(abs(mz(mse.norm.filt) - target_mz))   # exact at 4 dp
-  vals <- as.numeric(intensity(mse.norm.filt)[fi, ])      # one intensity per pixel
+  vals <- as.numeric(sii_intensity[as.character(fid), ])  # one intensity per pixel
 
   df <- copy(pdata_sii)
   df[, intensity := vals]
@@ -852,8 +889,8 @@ for (f in fids) {
     theme(panel.border = element_rect(colour = "#999999", fill = NA, linewidth = 0.25))
 
   # bottom caption: m/z + LIPID MAPS annotation
-  this_mz <- round(unique(tmp_df$mz)[1], 4)
-  lipid   <- annot_lookup$lipid[match(this_mz, annot_lookup$mz)]
+  this_mz <- unique(tmp_df$mz)[1]
+  lipid   <- match_lipid(this_mz)
   cap <- if (is.na(lipid) || lipid == "") {
     paste0("Feature: ", round(this_mz, 3), " m/z")
   } else {
@@ -868,11 +905,41 @@ for (f in fids) {
 
   ggsave(file.path("QQ-Itx-SII-Plots-Stroke-TissuexDays", paste0("QQ-", f, ".png")),
          plot = ggarr, height = 9, width = 11, units = "in")
+
+  if (f == fids[1]) first_ggarr <- ggarr
 }
+```
+
+Let's take a look at the first one:
+
+```{r, fig.width=11, fig.height=9}
+first_ggarr
+```
+
+## Restrict to adequately fit models
+
+In `3-Statistical-Modeling` we manually classified each feature's QQ plot, residual variance, and outliers from this plot set, and tested hypotheses only on the features that passed. That evaluation has not yet been done for the stroke dataset, so the tests below currently run on every model. The scaffold below applies the same filter once
+`Outputs/stroke-feature-model-fit-evaluation.csv` exists, with the same `fid`, `qq`, `var`, and `outliers` columns as the arthritis version.
+
+```{r}
+# model_fit_eval <- read_csv(file.path(outputs.path,
+#                                      "stroke-feature-model-fit-evaluation.csv"),
+#                            show_col_types = FALSE) |>
+#   mutate(across(qq:outliers, as.factor))
+#
+# # guard against the evaluation drifting out of sync with the feature list
+# stopifnot(nrow(model_fit_eval) == length(mt))
+#
+# passed <- model_fit_eval |>
+#   filter(qq == "ok" & var == "ok" & outliers == "ok")
+#
+# mt <- mt[passed$fid]
 ```
 
 
 # Step 4: Statistical inference
+
+With the models fit, we can test our hypotheses. As in `4-Statistical-Inference`, we will run all pairwise contrasts with `contrastTest` and then extract the two of interest.
 
 ## Load packages
 ```{r}
@@ -881,6 +948,8 @@ library(Cardinal)
 library(lmerTest)   # provides fixef()/VarCorr() for the reference means & variances
 library(ggrepel)    # for labelling the top volcano points
 ```
+
+First, labels for our two hypotheses. `contrastTest` names each contrast after the levels being compared, so we also record the exact names it emits.
 
 ```{r}
 # Hypothesis labels
@@ -892,15 +961,21 @@ name_h1 <- "day7 stroke - day28 stroke"
 name_h2 <- "day28 cortexwm - day28 stroke"
 ```
 
+Now run the contrasts. As with the arthritis study, this produces every pairwise combination of the four (2x2) levels of day and tissue, of which we only care about two.
+
 ```{r}
 # Run all pairwise contrasts
 ct <- contrastTest(mt, specs = ~ day * tissue, method = "pairwise")
 ```
 
+`topFeatures` returns a wide table with FDR-adjusted P values for each contrast, corrected independently.
+
 ```{r}
 # Wide results table
 tf <- as_tibble(topFeatures(ct))   # returns all features; pass n = to limit
 ```
+
+The column names of that table are built from the contrast names, so the helper below pulls out a single contrast and strips the prefix back off.
 
 ```{r}
 # topFeatures column names are make.names(contrast) + "." + {estimate,pvalue,fdr}.
@@ -917,6 +992,8 @@ pull_contrast <- function(tf, contrast_name, label) {
 }
 ```
 
+To express each estimate as a percent difference, we need the mean of the reference level of each comparison. We can compute these directly from the fixed effects of each model.
+
 ```{r}
 # Reference-level cell means from the fixed effects (reference levels = day7,
 # cortexwm), used to express the estimate as a percent difference.
@@ -924,11 +1001,14 @@ pull_contrast <- function(tf, contrast_name, label) {
 #   day-28 cortexwm = (Intercept) + day28
 ref_means <- bind_rows(lapply(seq_len(length(mt)), function(k) {
   b <- fixef(mt[[k]])
+  stopifnot(all(c("(Intercept)", "tissuestroke", "day28") %in% names(b)))
   tibble(i      = k,
          ref_h1 = unname(b["(Intercept)"] + b["tissuestroke"]),
          ref_h2 = unname(b["(Intercept)"] + b["day28"]))
 }))
 ```
+
+Now we can assemble both hypotheses into one table, attach the percent differences, and label the features with their LIPID MAPS identities.
 
 ```{r}
 signift_stroke <- bind_rows(
@@ -942,10 +1022,12 @@ signift_stroke <- bind_rows(
          # panel order: h1 (between-subject, days in stroke) left, h2 (within-subject) right
          contrast = factor(contrast, levels = c(lab_h1, lab_h2))) |>
   arrange(pvalue) |>
-  # attach lipid identities (LIPID MAPS names keyed on the aligned m/z)
-  mutate(lipid = annot_lookup$lipid[match(round(mz, 4), annot_lookup$mz)])
+  mutate(lipid = match_lipid(mz))
 ```
 
+## Correct for multiple testing
+
+How many features are significant for each hypothesis at an FDR of 0.1?
 
 ```{r}
 signift_stroke |>
@@ -953,6 +1035,7 @@ signift_stroke |>
   knitr::kable()
 ```
 
+Let's visualize both comparisons as a volcano plot, labeled with the two most significant annotated lipids per hypothesis. As in the arthritis case study, the dashed line marks an unadjusted P value of 0.01.
 
 ```{r}
 volcano_labels <- signift_stroke |>
@@ -991,6 +1074,7 @@ ggsave(file.path("Recreated-Figures", "Figure-Stroke-Volcano.png"),
        height = 5.75, width = 6, units = "in")
 ```
 
+As before, we can inspect the distributions of unadjusted P values for signs of interdependence between tests.
 
 ```{r}
 signift_stroke |>
@@ -1006,10 +1090,8 @@ signift_stroke |>
 
 ```
 
-Recreating the single ion images for the most significant ion per comparison figure in the manuscript.
+Finally, we will recreate the single ion images of the most significant ion per comparison from the manuscript.
 ```{r}
-library(ggpubr)
-
 # Most significant ion (smallest p-value) in each contrast.
 top_ion_per_contrast <- signift_stroke |>
   dplyr::slice_min(pvalue, n = 1, by = contrast)
@@ -1018,8 +1100,7 @@ for (k in seq_len(nrow(top_ion_per_contrast))) {
 
   row <- top_ion_per_contrast[k, ]
 
-  # map the contrast's m/z back to a feature_id understood by sii()
-  fid <- mz_lookup$feature_id[match(round(row$mz, 4), mz_lookup$mz)]
+  fid <- mz_lookup$feature_id[which.min(abs(mz_lookup$mz - row$mz))]
 
   cap <- if (is.na(row$lipid) || row$lipid == "") {
     paste0("Feature: ", round(row$mz, 3), " m/z")
@@ -1040,9 +1121,9 @@ for (k in seq_len(nrow(top_ion_per_contrast))) {
 
 # Step 5: Designing future experiments
 
-Like the arthritis study we can conclude this investifation by using the esimates of variance for sample size calcualtions. 
+Like the arthritis study, we can conclude this investigation by using the estimates of variance for sample size calculations.
 
-First, we will pull teh estiamtes of variance from each model.
+First, we will pull the estimates of variance from each model.
 ```{r}
 df_var <- bind_rows(lapply(seq_len(length(mt)), function(i) {
   m  <- mt[[i]]
@@ -1052,7 +1133,7 @@ df_var <- bind_rows(lapply(seq_len(length(mt)), function(i) {
 }))
 ```
 
-Then compute their medians.
+Then fix the power and target FDR and compute the median variance components.
 ```{r}
 FDR   <- 0.05
 power <- 0.9
@@ -1061,11 +1142,16 @@ median.sigma.subject <- median(df_var$sigma2_subject,  na.rm = TRUE)
 median.sigma.error   <- median(df_var$sigma2_residual, na.rm = TRUE)
 ```
 
+We also need a typical reference mean for each comparison, so that differences on the intensity scale can be expressed as percent differences.
+
 ```{r}
 ref_by_comparison <- signift_stroke |>
   group_by(contrast) |>
-  summarize(ref = median(ref, na.rm = TRUE), .groups = "drop")
+  summarize(ref = median(ref, na.rm = TRUE), .groups = "drop") |>
+  mutate(contrast = as.character(contrast))
 ```
+
+The sample size calculation is the same normal approximation used in `5-Designing-Future-Experiments`.
 
 ```{r}
 calc_sample_size <- function(desired_difference, alpha, power,
@@ -1079,7 +1165,7 @@ calc_sample_size <- function(desired_difference, alpha, power,
 }
 ```
 
-Set reasonable alphas based on the a couple scenarios.
+Set reasonable alphas for a couple of multiple-testing scenarios.
 
 ```{r}
 alpha_1  <- power * FDR / (1 + (1 - FDR) * 1)    # single comparison
@@ -1088,13 +1174,13 @@ alpha_90 <- power * FDR / (1 + (1 - FDR) * 90)   # FDR, 90% true-negative rate
 
 ```
 
-Compute median SE.
+Compute the variance of each difference. The between-subject comparison (Hypothesis A) carries both subject and residual variation, whereas the within-subject comparison (Hypothesis B) carries only residual variation, as each subject acts as its own control.
 ```{r}
 var_within  <- 2 * (median.sigma.error)
 var_between <- 2 * (median.sigma.error + median.sigma.subject)
 ```
 
-Compute the sample size per each estimates difference.
+Compute the sample size required for each anticipated difference.
 ```{r}
 comparison_labels <- c(lab_h2, lab_h1)
 delta_range <- c(1, 1500)
@@ -1124,7 +1210,7 @@ df_curves <- bind_rows(
   )
 ```
 
-Plot curves.
+Plot the curves. The horizontal line at 5 marks the number of biological replicates per condition in this study.
 ```{r}
 greys <- setNames(c("grey70", "grey30"), c(lab_h2, lab_h1))  # within light / between dark
 
@@ -1151,7 +1237,7 @@ ggsave(file.path("Recreated-Figures", "Figure-Stroke-Power.png"),
        height = 6, width = 6, units = "in")
 ```
 
-Finally, at 5 biological replicates, what is the esimate of the minimm detectable difference?
+Finally, at 5 biological replicates, what is the estimated minimum detectable difference?
 ```{r}
 df_curves |>
   filter(n_sig_test == "FDR correction, 90% true negative rate") |>
