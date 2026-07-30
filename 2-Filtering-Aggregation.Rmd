@@ -85,7 +85,7 @@ if (length(indices_of_ROI_segmentation_ions) >= 1) {
 
 # Non-specific filtering
 
-We will be filtering by mean and standard deviation. We assume that noisy, non-informative features have low variation and low intensity. For simplicity, we will drop features where sample-wide mean intensity and standard deviation are both in the bottom 25th percentile in non-background pixels.
+We will be filtering by mean and standard deviation. We assume that noisy, non-informative features have low variation and low intensity. For simplicity, we will drop features where sample-wide mean intensity or standard deviation is in the bottom 25th percentile in non-background pixels.
 
 Now we can compute the mean and standard deviation of each feature across all samples.
 
@@ -231,7 +231,7 @@ writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSF
 
 Like during initial peak picking, we will apply a filter that will save us a lot of trouble later during statistical modeling. Highly sparse features create unstable estimates of mean abundance. The models detailed in this work assume normal distributions of residuals. Zero inflation will cause serious deviation from this assumption, yielding poor fit and invalid results. To keep things simple, we will drop features that are very sparse in the cartilage ROI. This represents a conservative modeling approach and will drastically reduce the number of features we continue analysis with. Alternate options include using models that are invariant to zero inflation.
 
-Drop features that are present (non-zero and finite) in fewer than 25% of pixels in any run.
+Drop features that are present (non-zero and finite) in fewer than 50% of pixels in any run.
 
 ```{r}
 mse_cartilage <- subsetPixels(mse, tissue_zone== "cartilage")
@@ -251,7 +251,7 @@ mse <- subsetFeatures(mse, mz %in% mz(mse_cartilage_filt))
 Save the as .imzML files. Onward to modeling!
 
 ```{r}
-writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"),
+writeMSIDataSafe(mse, file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML"),
                 verbose = F)
 ```
 
@@ -266,7 +266,7 @@ mse_ns_filt <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocesse
   verbose = F)
 mse_deiso <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated.imzML"),
   verbose = F)
-mse_cart_filtered <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"),
+mse_cart_filtered <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML"),
   verbose = F)
 
 # Count feature drops dynamically at each stage, so the narrative stays correct

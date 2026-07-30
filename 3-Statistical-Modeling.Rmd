@@ -42,7 +42,7 @@ gcinfo(verbose = FALSE)
 ## Load peak-picked, normalized, aggregated data
 
 ```{r find_imzML}
-DATA_PATH <- file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML")
+DATA_PATH <- file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML")
 mse <- readMSIData(DATA_PATH)
 ```
 
@@ -168,7 +168,7 @@ Next, we will extract the feature data from the MSE objects (roughly, a data fra
 mse_frame <- as_tibble(fData(mse)) |>
   mutate(feature_id = row_number()) |>
   pivot_longer(
-    X6891.OA.lateral.mean:X6954.OA.medial.mean,
+    matches("^X.*\\.mean$"),
     names_to = "run",
     values_to = "cartilage.mean",
     names_pattern = "X(.+)\\.mean$",

@@ -54,7 +54,7 @@ Like statistical modeling, we perform statistical testing in Cardinal or externa
 
 ## Method 1: Comparison testing in Cardinal
 
-`Cardinal::contrast()` offers arguments to specify custom contrasts using `emmeans` syntax and performed using `emmeans`. First, we will load the `meansTest` results object from 3-Statistical-Modeling. The results object contains a summary data frame accessible with `mtops()` and the `lmer` models. We will also load the results from manual diagnosis of model fit, creating a list of features that adequately meet model assumptions.
+`Cardinal::contrastTest()` offers arguments to specify custom contrasts using `emmeans` syntax and performed using `emmeans`. First, we will load the `meansTest` results object from 3-Statistical-Modeling. The results object contains a summary data frame accessible with `mtops()` and the `lmer` models. We will also load the results from manual diagnosis of model fit, creating a list of features that adequately meet model assumptions.
 
 
 ```{r load_imzML}
@@ -72,7 +72,7 @@ passed <- model_fit_eval |>
 
 ### Run tests
 
-In `emmeans`, which Cardinal uses for hypothesis testing and which we will use externally, we can specify `~ condition | tissue` as `contrast.specs` for Hypothesis A (i.e., "condition given tissue"). To get the actual pairwise contrasts, we supply `"pairwise"` as the `contrast.method`. `emmeans` offers tremendous functionality and versatility, with [many possible ways to specify contrasts](https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html). We will explore other syntax when we repeat these analyses externally from Cardinal in the next part of this workflow.
+In `emmeans`, which Cardinal uses for hypothesis testing and which we will use externally, we specify `~condition * tissue` and supply `"pairwise"` as the `method` to get all pairwise contrasts. `emmeans` offers tremendous functionality and versatility, with [many possible ways to specify contrasts](https://cran.r-project.org/web/packages/emmeans/vignettes/comparisons.html). We will explore other syntax when we repeat these analyses externally from Cardinal in the next part of this workflow.
 
 ```{r, results='hide', message=FALSE, warning=FALSE}
 measTest_models_with_acceptable_fit <- lmer_means_test[passed$fid]
@@ -92,7 +92,7 @@ We can see that the p-value is large for `r round(h@elementMetadata[1,2], 3)` m/
 
 ### Correct for multiple testing
 
-Running more tests increases the probability that one of the tests will be a false positive. We can correct for this in a variety of ways, such as globally lowering the threshold for significance (e.g., the Bonferroni correction). The preferred method, however, is to correct the false discovery rate (FDR), or the false-positive rate of just our positive tests. By setting an acceptable rate of positive tests that are false (in our case 0.05, or 5%, independently per hypothesis), we can apply a less strict correction. Cardinal includes a function for FDR correction, `topFeatures`.
+Running more tests increases the probability that one of the tests will be a false positive. We can correct for this in a variety of ways, such as globally lowering the threshold for significance (e.g., the Bonferroni correction). The preferred method, however, is to correct the false discovery rate (FDR), or the false-positive rate of just our positive tests. By setting an acceptable rate of positive tests that are false (in our case 0.05 per comparison, or 0.1 overall), we can apply a less strict correction. Cardinal includes a function for FDR correction, `topFeatures`.
 
 ```{r}
 kableExtra::kbl(topFeatures(h, n=5, sort.by = 2)) |>
@@ -280,7 +280,7 @@ This code below will recreate the tables and figures from the manuscript.
 ```{r, results='hide', warning=FALSE, message=FALSE, output = "hide"}
 knitr::kable(model_fit_eval |> select(-c(fid)))
 
-m <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML"))
+m <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML"))
 
 stopifnot(length(mz(m))==length(model_fit_eval$fid))
 stopifnot(length(mz(m))>=max(passed$fid))

@@ -82,7 +82,7 @@ download_dirs <- list(
   "Data/Preprocessing/normalized.imzML" = TRUE,
   "Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML" = TRUE,
   "Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML" = TRUE,
-  "Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML" = TRUE,
+  "Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML" = TRUE,
   "Data/Simulation-Data"            = TRUE
 )
 ```
