@@ -43,3 +43,8 @@ afternorm.csv
 /Recreated-Figures_OLD
 render-all-full-run.log
 render-all.log
+
+.massive-credentials
+massive_upload_vignettes.sh
+massive_upload_vignettes_completed.log
+massive_upload_vignettes.log

@@ -50,7 +50,7 @@ Preprocessing of the stroke dataset differs substantially from the arthritis cas
 We will begin by loading packages and data.
 
 
-```{r}
+```{r library, results='hide', warning=FALSE, message=FALSE}
 library(readr)
 library(dplyr)
 library(tibble)
@@ -90,9 +90,22 @@ samp <- name_tibble |>
     filter(!is.na(days) & !is.na(replicate))
 ```
 
-We will reorient the brains to be vertical and rename the runs for easier file management.
+Recalibration and alignment are by far the longest steps. We only run them when their outputs are not already on disk, so that re-knitting does not repeat them. Delete the relevant directory to force a rerun after changing preprocessing parameters.
 
 ```{r}
+run.recalibration <- !all(file.exists(file.path(recalib.data.path,
+                                                paste0(samp$short_name, ".imzML"))))
+
+run.alignment <- !all(file.exists(file.path(aligned.data.path,
+                                            paste0(samp$short_name, ".imzML"))))
+
+cat("Recalibration:", ifelse(run.recalibration, "running", "reusing existing"), "\n")
+cat("Alignment:", ifelse(run.alignment, "running", "reusing existing"), "\n")
+```
+
+We will reorient the brains to be vertical and rename the runs for easier file management.
+
+```{r, eval=run.recalibration}
 msa.raw <- list()
 
 for (s in samp$filename) {
@@ -114,17 +127,17 @@ for (s in samp$filename) {
     msa.raw[[sn]] <- m
 }
 
-gc()
+invisible(gc())
 ```
 
 ## Recalibration
 These data do not require baseline removal or smoothing, but, like most data, benefit from recalibration. We will recalibrate each sample to a set of reference peaks estimated from that sample.
 
-```{r}
+```{r, eval=run.recalibration}
 bp <- SnowfastParam(workers = 10L, force.GC = T)
 
 for (sn in samp$short_name) {
-    print(paste("Starting", sn, "\n"))
+    cat("Starting", sn, "\n")
     est_ref_peaks <- msa.raw[[sn]] |>
 		estimateReferencePeaks(BPPARAM = bp)
     msa.raw[[sn]] |>
@@ -134,7 +147,7 @@ for (sn in samp$short_name) {
 }
 
 rm(msa.raw)
-gc()
+invisible(gc())
 ```
 
 ## Peak alignment from known peak list and IS C13 lipids
@@ -158,7 +171,7 @@ all.peaks.to.align <- sort(c(c13.is.lipids, lcms.peaks$`Input Mass`))
 
 ### Align each sample individually
 As each sample is aligned to the same peaks, we can align them individually to reduce memory overhead.
-```{r}
+```{r, eval=run.alignment}
 bp <- SnowfastParam(workers = 8L, force.GC = T)
 
 # load, align, save
@@ -168,7 +181,7 @@ for (sn in samp$short_name) {
     process(BPPARAM = bp) |>
     writeMSIDataSafe(file.path(aligned.data.path, paste0(sn, ".imzML")))
 }
-gc()
+invisible(gc())
 ```
 
 Get the internal standard indices of the aligned data.
@@ -277,23 +290,23 @@ annot.qp <- read_csv(file.path(outputs.path,
                     show_col_types = FALSE)
 ```
 
-Before we proceed, we will verify that the coordinates and runs are all in the same order, then assign the annotations to pixels.
+The annotations were drawn on a previous run of the trim above. Peak alignment is not perfectly reproducible across runs, so a handful of pixels can sit either side of the non-zero cutoffs and the trimmed set may differ by a few pixels from the one that was annotated. We therefore match annotations on run and coordinate rather than on position, and require that every trimmed pixel received a label.
 
 ```{r}
-stopifnot(
-all(pData(mse_subset_trim_islands)$x == annot.qp$x),
-all(pData(mse_subset_trim_islands)$y == annot.qp$y),
-all(pData(mse_subset_trim_islands)$run == annot.qp$run)
-)
+annot.idx <- match(key(pData(mse_subset_trim_islands)), key(annot.qp))
 
-pData(mse_subset_trim_islands)$stroke <- annot.qp$stroke
-pData(mse_subset_trim_islands)$hemisphere <- annot.qp$hemisphere
-pData(mse_subset_trim_islands)$cortexwm <- annot.qp$cortexwm
+stopifnot(!anyNA(annot.idx))
+
+cat("Annotated pixels not in the current trim: ", nrow(annot.qp) - length(annot.idx), "\n")
+
+pData(mse_subset_trim_islands)$stroke <- annot.qp$stroke[annot.idx]
+pData(mse_subset_trim_islands)$hemisphere <- annot.qp$hemisphere[annot.idx]
+pData(mse_subset_trim_islands)$cortexwm <- annot.qp$cortexwm[annot.idx]
 ```
 
 We can visualize them.
 
-```{r}
+```{r, fig.width=10, fig.height=7}
 image(mse_subset_trim_islands, "stroke")
 image(mse_subset_trim_islands, "hemisphere")
 image(mse_subset_trim_islands, "cortexwm")
@@ -328,13 +341,13 @@ is.mask <- mse.is.tmp$mean < quantile(mse.is.tmp$mean, p = .99)
 
 Let's take a look.
 
-```{r}
+```{r, fig.width=16, fig.height=10}
 image(mse.is |> subsetPixels(tissue_mask) , subset = is.mask, i = c(1,4,5,7,8), layout = c(5, 10), key = F, grid = F, style = "dark")
 ```
 
 Now let's save everything.
 
-```{r}
+```{r, fig.width=10, fig.height=5}
 mse.roi.trimmed <- mse_subset_trim_islands |> 
     subsetPixels(is.mask)
 
@@ -574,6 +587,30 @@ Save the dataset for modeling.
 writeMSIDataSafe(normalized, file.path(preprocessing.data.path, "IS-normalized-filtered.imzML"))
 ```
 
+Let's tally what each step dropped.
+
+```{r}
+mse.aligned <- readMSIData(file.path(preprocessing.data.path, "Analytes-IS-Aligned.imzML"))
+mse.norm <- readMSIData(file.path(preprocessing.data.path, "IS-normalized.imzML"))
+mse.filt <- readMSIData(file.path(preprocessing.data.path, "IS-normalized-filtered.imzML"))
+
+n.aligned <- length(mz(mse.aligned))
+n.norm <- length(mz(mse.norm))
+n.filt <- length(mz(mse.filt))
+
+cat("Features aligned ", n.aligned, "\n", sep = "")
+cat("After dropping the marker and low-intensity internal standards [-",
+  n.aligned - n.norm, "] ", n.norm, "\n", sep = "")
+cat("After dropping the remaining internal standards and non-specific filtering [-",
+  n.norm - n.filt, "] ", n.filt, "\n", sep = "")
+
+cat("Pixels aligned ", ncol(mse.aligned), "\n", sep = "")
+cat("After background trimming and internal standard masking [-",
+  ncol(mse.aligned) - ncol(mse.filt), "] ", ncol(mse.filt), "\n", sep = "")
+cat("In the stroke ROI ", sum(mse.filt$stroke), "\n", sep = "")
+cat("In the cortex white matter ROI ", sum(mse.filt$cortexwm), "\n", sep = "")
+```
+
 # Step 3: Statistical modeling
 
 We will use essentially the same model as the arthritis case study, specified below:
@@ -644,6 +681,12 @@ Now we will fit the models with `meansTest`, using `lmer` so that we can test co
 
 ```{r}
 mt <- meansTest(modeling.mse, ~ day * tissue, ~ 1|subject, samples = modeling.mse$samples, use_lmer = T, na.rm = T)
+```
+
+The `singular` column flags models that could not separate subject variance from residual variance. We will return to these variance estimates in Step 5.
+
+```{r, max.height='150px'}
+mt
 ```
 
 ## Visualize diagnostic plots
@@ -826,7 +869,7 @@ itx_fancy <- function(tmp_df) {
 
 
 
-```{r}
+```{r, results='hide', warning=FALSE, message=FALSE}
 library(ggpubr)
 library(ggrepel)
 
@@ -942,7 +985,7 @@ In `3-Statistical-Modeling` we manually classified each feature's QQ plot, resid
 With the models fit, we can test our hypotheses. As in `4-Statistical-Inference`, we will run all pairwise contrasts with `contrastTest` and then extract the two of interest.
 
 ## Load packages
-```{r}
+```{r, results='hide', warning=FALSE, message=FALSE}
 library(tidyverse)
 library(Cardinal)
 library(lmerTest)   # provides fixef()/VarCorr() for the reference means & variances
@@ -1037,7 +1080,7 @@ signift_stroke |>
 
 Let's visualize both comparisons as a volcano plot, labeled with the two most significant annotated lipids per hypothesis. As in the arthritis case study, the dashed line marks an unadjusted P value of 0.01.
 
-```{r}
+```{r, fig.width=6, fig.height=5.75}
 volcano_labels <- signift_stroke |>
   dplyr::filter(!is.na(lipid)) |>
   dplyr::slice_min(pvalue, n = 2, by = contrast)
@@ -1074,9 +1117,27 @@ ggsave(file.path("Recreated-Figures", "Figure-Stroke-Volcano.png"),
        height = 5.75, width = 6, units = "in")
 ```
 
-As before, we can inspect the distributions of unadjusted P values for signs of interdependence between tests.
+Below are the significant features for each hypothesis, with their LIPID MAPS annotations.
 
 ```{r}
+signift_stroke |>
+  filter(signif_after_fdr_adj) |>
+  mutate(`M/Z` = round(mz, 3),
+         Lipid = lipid,
+         `Percent Difference` = round(pct_delta * 100, 1),
+         `P Value` = signif(pvalue, 3),
+         `FDR Adj. P Value` = signif(fdr, 3)) |>
+  select(Hypothesis = contrast, `M/Z`, Lipid, `Percent Difference`,
+         `P Value`, `FDR Adj. P Value`) |>
+  arrange(Hypothesis, `P Value`) |>
+  kableExtra::kbl() |>
+  kableExtra::kable_styling(full_width = FALSE) |>
+  kableExtra::scroll_box(width = "100%", height = "400px")
+```
+
+As before, we can inspect the distributions of unadjusted P values for signs of interdependence between tests.
+
+```{r, fig.width=6, fig.height=4}
 signift_stroke |>
   ggplot(aes(x = pvalue)) +
   geom_histogram(bins = 7, fill = "gray50", color = "white", boundary = 0) +
@@ -1091,7 +1152,7 @@ signift_stroke |>
 ```
 
 Finally, we will recreate the single ion images of the most significant ion per comparison from the manuscript.
-```{r}
+```{r, fig.width=4, fig.height=7}
 # Most significant ion (smallest p-value) in each contrast.
 top_ion_per_contrast <- signift_stroke |>
   dplyr::slice_min(pvalue, n = 1, by = contrast)
@@ -1115,6 +1176,8 @@ for (k in seq_len(nrow(top_ion_per_contrast))) {
   ggsave(file.path("Recreated-Figures",
                    paste0("Figure-Stroke-TopSII-", make.names(row$contrast), ".png")),
          plot = sii_plot, height = 6, width = 3, units = "in")
+
+  print(sii_plot)
 }
 ```
 
@@ -1211,7 +1274,7 @@ df_curves <- bind_rows(
 ```
 
 Plot the curves. The horizontal line at 5 marks the number of biological replicates per condition in this study.
-```{r}
+```{r, fig.width=6, fig.height=6, warning=FALSE, message=FALSE}
 greys <- setNames(c("grey70", "grey30"), c(lab_h2, lab_h1))  # within light / between dark
 
 ggplot(df_curves, aes(x = pct, y = numSample, color = comparison)) +
