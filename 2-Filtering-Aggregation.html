@@ -11,7 +11,7 @@
 
 <meta name="author" content="Ethan Rogers" />
 
-<meta name="date" content="2026-03-20" />
+<meta name="date" content="2026-07-31" />
 
 <title>2-Filtering-Aggregation</title>
 
@@ -412,8 +412,8 @@ if (length(indices_of_ROI_segmentation_ions) &gt;= 1) {
 <p>We will be filtering by mean and standard deviation. We assume that
 noisy, non-informative features have low variation and low intensity.
 For simplicity, we will drop features where sample-wide mean intensity
-and standard deviation are both in the bottom 25th percentile in
-non-background pixels.</p>
+or standard deviation is in the bottom 25th percentile in non-background
+pixels.</p>
 <p>Now we can compute the mean and standard deviation of each feature
 across all samples.</p>
 <pre class="r"><code>mse &lt;- subsetPixels(mse, tissue_zone != &quot;background&quot;)
@@ -440,22 +440,6 @@ mse &lt;- summarizeFeatures(mse,
 <p>Let’s save this for later</p>
 <pre class="r"><code>writeMSIDataSafe(mse, file.path(&quot;Data&quot;,&quot;Filtering-Aggregation&quot;,&quot;Preprocessed-NSFiltered.imzML&quot;),
                 verbose = F)</code></pre>
-<pre><code>## Warning in .write_ibd(path_ibd, mz = mz, intensity = intensity, mz.type =
-## mz.type, : file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML/Preprocessed-NSFiltered.ibd&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning in .write_imzML(path_imzML, metadata = object): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML/Preprocessed-NSFiltered.imzML&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_featureData(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML/Preprocessed-NSFiltered.fdata&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_pixelData(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML/Preprocessed-NSFiltered.pdata&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_metadata(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML/Preprocessed-NSFiltered.metadata&#39;
-## already exists and will be overwritten</code></pre>
 </div>
 </div>
 <div id="feature-clustering" class="section level1">
@@ -574,22 +558,6 @@ mse &lt;- subsetFeatures(mse, mz %in% isotopes_to_keep)</code></pre>
 <p>Save this intermediate.</p>
 <pre class="r"><code>writeMSIDataSafe(mse, file.path(&quot;Data&quot;,&quot;Filtering-Aggregation&quot;,&quot;Preprocessed-NSFiltered-Aggregated.imzML&quot;),
                 verbose = F)</code></pre>
-<pre><code>## Warning in .write_ibd(path_ibd, mz = mz, intensity = intensity, mz.type =
-## mz.type, : file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML/Preprocessed-NSFiltered-Aggregated.ibd&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning in .write_imzML(path_imzML, metadata = object): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML/Preprocessed-NSFiltered-Aggregated.imzML&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_featureData(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML/Preprocessed-NSFiltered-Aggregated.fdata&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_pixelData(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML/Preprocessed-NSFiltered-Aggregated.pdata&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_metadata(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML/Preprocessed-NSFiltered-Aggregated.metadata&#39;
-## already exists and will be overwritten</code></pre>
 <p>Like during initial peak picking, we will apply a filter that will
 save us a lot of trouble later during statistical modeling. Highly
 sparse features create unstable estimates of mean abundance. The models
@@ -601,7 +569,7 @@ conservative modeling approach and will drastically reduce the number of
 features we continue analysis with. Alternate options include using
 models that are invariant to zero inflation.</p>
 <p>Drop features that are present (non-zero and finite) in fewer than
-25% of pixels in any run.</p>
+50% of pixels in any run.</p>
 <pre class="r"><code>mse_cartilage &lt;- subsetPixels(mse, tissue_zone== &quot;cartilage&quot;)
 
 mse_cartilage &lt;- summarizeFeatures(mse_cartilage,
@@ -614,24 +582,8 @@ mse_cartilage_filt &lt;- filterFeaturesByRunFreq(mse_cartilage, 0.5)
 
 mse &lt;- subsetFeatures(mse, mz %in% mz(mse_cartilage_filt))</code></pre>
 <p>Save the as .imzML files. Onward to modeling!</p>
-<pre class="r"><code>writeMSIDataSafe(mse, file.path(&quot;Data&quot;,&quot;Filtering-Aggregation&quot;,&quot;Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML&quot;),
+<pre class="r"><code>writeMSIDataSafe(mse, file.path(&quot;Data&quot;,&quot;Filtering-Aggregation&quot;,&quot;Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML&quot;),
                 verbose = F)</code></pre>
-<pre><code>## Warning in .write_ibd(path_ibd, mz = mz, intensity = intensity, mz.type =
-## mz.type, : file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.ibd&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning in .write_imzML(path_imzML, metadata = object): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_featureData(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.fdata&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_pixelData(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.pdata&#39;
-## already exists and will be overwritten</code></pre>
-<pre><code>## Warning: in .write_metadata(object, path, verbose): file
-## &#39;/Volumes/Local/Data/private/viteklab/MSI_Arthritis_Vignettes/Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.metadata&#39;
-## already exists and will be overwritten</code></pre>
 <div id="code-to-recreate-figures-and-tables" class="section level3">
 <h3>Code to recreate figures and tables</h3>
 <pre class="r"><code>mse_pp &lt;- readMSIData(file.path(&quot;Data&quot;, &quot;Preprocessing&quot;, &quot;Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML&quot;),
@@ -641,7 +593,7 @@ mse_ns_filt &lt;- readMSIData(file.path(&quot;Data&quot;,&quot;Filtering-Aggrega
   verbose = F)
 mse_deiso &lt;- readMSIData(file.path(&quot;Data&quot;,&quot;Filtering-Aggregation&quot;,&quot;Preprocessed-NSFiltered-Aggregated.imzML&quot;),
   verbose = F)
-mse_cart_filtered &lt;- readMSIData(file.path(&quot;Data&quot;,&quot;Filtering-Aggregation&quot;,&quot;Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML&quot;),
+mse_cart_filtered &lt;- readMSIData(file.path(&quot;Data&quot;,&quot;Filtering-Aggregation&quot;,&quot;Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML&quot;),
   verbose = F)
 
 # Count feature drops dynamically at each stage, so the narrative stays correct

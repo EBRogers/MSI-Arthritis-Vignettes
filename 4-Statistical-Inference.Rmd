@@ -1,7 +1,7 @@
 ---
 title: "4-Statistical-Inference"
 author: "Ethan Rogers"
-date: "03/20/2026"
+date: "07/31/2026"
 output:
   html_document: default
 ---
@@ -277,7 +277,7 @@ signift_cartilage |>
 As the distribution of p-values is neither uniform nor right-skewed, there may be some interdependence between tests, but this is hard to verify with so few tests overall. It would not be surprising were there interdependence however, as the tests are performed on the same samples and many metabolites are biochemically related. Better clustering of features could eliminate some of this potential interdependence. Some software packages offer methods to account for interdependence in multiple testing correction, such as the `locfdr` package.
 
 This code below will recreate the tables and figures from the manuscript.
-```{r, results='hide', warning=FALSE, message=FALSE, output = "hide"}
+```{r,  warning=FALSE, message=FALSE}
 knitr::kable(model_fit_eval |> select(-c(fid)))
 
 m <- readMSIData(file.path("Data","Filtering-Aggregation","Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML"))
