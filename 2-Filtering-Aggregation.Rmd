@@ -355,7 +355,7 @@ id_3 <- iso_merged |> filter(group_id %in% c(jl_3[34])) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-3-isotope-sii.png"), width = 1500, height = 900, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3]), 
-      scale = F, 
+      scale = T, 
       superpose = F, 
       layout = c(3,3), 
       key = F, 
@@ -386,7 +386,7 @@ id_3 <- iso_merged |> filter(group_id == jl[36]) |> pull(feature_id)
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-2-isotope-sii.png"), width = 1500, height = 700, pointsize = 54)
 image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]), 
-      scale = F, 
+      scale = T, 
       superpose = F, 
       layout = c(2,3), 
       key = F, 

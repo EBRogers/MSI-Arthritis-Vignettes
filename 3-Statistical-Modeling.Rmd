@@ -326,10 +326,8 @@ sii <- function(fid, bone_alpha = 0.3, background_alpha = 1,
     xlab(NULL) +
     ylab(NULL) +
     facet_wrap(~ tid, ncol = 4) +
-    scale_fill_viridis_c(
-      option = "turbo",
-      begin = 0,
-      end = 1,
+    scale_fill_gradientn(
+      colours = cpal("Viridis")(256),
       limits = c(0, intensity_cap),
       oob = scales::squish,
       na.value = background_color
@@ -340,7 +338,7 @@ sii <- function(fid, bone_alpha = 0.3, background_alpha = 1,
       panel.spacing.x = unit(0, "pt"),   # gap between columns
       panel.spacing.y = unit(1, "pt")    # gap between rows
     ) +
-    labs(fill = "Intensity")
+    labs(fill = "Intensity in ROIs")
 }
 
 itx_fancy <- function(tmp_df){
