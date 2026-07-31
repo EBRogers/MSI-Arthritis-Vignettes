@@ -48,3 +48,8 @@ render-all.log
 massive_upload_vignettes.sh
 massive_upload_vignettes_completed.log
 massive_upload_vignettes.log
+massive_upload_stroke_tmux.sh
+massive-manifest-vignette-6.txt
+massive_upload_stroke*.log
+.massive_stroke_worker.sh
+massive_upload_vignettes.log
