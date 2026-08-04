@@ -97,12 +97,25 @@ Downloading is off by default, so knitting this document transfers nothing. To f
 download <- FALSE
 ```
 
-`fetch` downloads a single file, choosing FTPS or HTTPS from the URL, skipping files already present, and retrying transient failures. `fetch_par` downloads many files from MassIVE at once via `curl --parallel`, which is much faster than fetching them one at a time. `login` is passed to the MassIVE FTP server; `anonymous:anonymous` works for the public dataset, and can be set to a MassIVE `username:password` for a private one. `expand` unpacks a zip archive with whichever of `unzip` or `tar` is available, since R's internal unzip cannot read entries larger than 4 GB.
+### Create data directories
+
+`Data/` holds the arthritis data for vignettes 1–5 and `Mouse-Stroke-Data/` the stroke data for vignette 6. Create the structure for both up front; the sections below download into it.
+
+```{r}
+data_dirs <- c(
+  "Data/Raw", "Data/Preprocessing", "Data/Filtering-Aggregation", "Data/Simulation-Data",
+  "Mouse-Stroke-Data/Raw", "Mouse-Stroke-Data/Preprocessing-Filtering"
+)
+for (d in data_dirs) dir.create(d, showWarnings = FALSE, recursive = TRUE)
+```
+
+### Download helpers
+
+`fetch` downloads a single file, choosing FTPS or HTTPS from the URL, skipping files already present, and retrying transient failures. `fetch_par` downloads many files from MassIVE at once via `curl --parallel`, which is much faster than fetching them one at a time. `login` is passed to the MassIVE FTP server; `anonymous:anonymous` works for the public dataset, and can be set to the dataset's submission/reviewer credentials for a private one. `expand` unpacks a zip archive with whichever of `unzip` or `tar` is available, since R's internal unzip cannot read entries larger than 4 GB.
 
 ```{r}
 fetch <- function(url, dest, login = "anonymous:anonymous", tries = 5) {
   if (file.exists(dest)) return(invisible())
-  dir.create(dirname(dest), showWarnings = FALSE, recursive = TRUE)
   part <- paste0(dest, ".part")
   for (i in seq_len(tries)) {
     ok <- tryCatch({
@@ -127,7 +140,6 @@ fetch_par <- function(urls, dests, login = "anonymous:anonymous", max = 4, tries
   keep <- !file.exists(dests)
   urls <- urls[keep]; dests <- dests[keep]
   if (!length(urls)) return(invisible())
-  for (d in unique(dirname(dests))) dir.create(d, showWarnings = FALSE, recursive = TRUE)
   args <- c("--ssl-reqd", "--user", login, "--parallel", "--parallel-max", max,
             "--retry", tries, "--fail", "--silent", "--show-error", "--remove-on-error",
             c(rbind("-o", dests, urls)))
@@ -147,16 +159,12 @@ expand <- function(zip, exdir = ".") {
 
 ### Arthritis data and Simulations (Vignettes 1–5 and Simulation 1-2)
 
-Converted raw spectra and the intermediate result of each step. `Raw` and `Simulation-Data` are plain files; the others are zip archives that expand into `Data/Preprocessing` or `Data/Filtering-Aggregation`. Set an entry to `TRUE` to download it. Files are fetched in parallel, which is much faster than one at a time; anonymous access allows about `parallel_max = 4` simultaneous connections before the server begins refusing them. With a MassIVE account for this dataset you can raise `parallel_max` and go faster — provide the credentials through the `MASSIVE_LOGIN` environment variable so they stay out of this notebook and its rendered output, either persistently in `~/.Renviron` or interactively in the R console before downloading:
-
-```{r, eval=FALSE}
-Sys.setenv(MASSIVE_LOGIN = readline("MassIVE username:password: "))
-```
+Converted raw spectra and the intermediate result of each step. `Raw` and `Simulation-Data` are plain files; the others are zip archives that expand into `Data/Preprocessing` or `Data/Filtering-Aggregation`. Set an entry to `TRUE` to download it. The public dataset is downloaded anonymously — no account needed — and files are fetched in parallel, which is much faster than one at a time; anonymous access allows about `parallel_max = 4` simultaneous connections before the server refuses more. Still, this will take while.
 
 ```{r}
 arthritis_url <- "ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-08-03_ebrogers_8d22a971"
 massive_login <- Sys.getenv("MASSIVE_LOGIN", "anonymous:anonymous")
-parallel_max  <- 4
+parallel_max  <- 4 # generally the max allowable by MassIVE
 
 arthritis <- c(
   "Raw"                                                    = TRUE,
