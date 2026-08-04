@@ -36,6 +36,9 @@ RNGkind("L'Ecuyer-CMRG")
 
 setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
+
+profile <- "laptop"
+hpc <- profile == "hpc"
 ```
 
 # Data availability
@@ -93,7 +96,8 @@ png(filename = file.path("Recreated-Figures",
 
 m <- mse_list_raw[[1]] |> 
   convertMSImagingArrays2Experiment() |>
-  summarizeFeatures(stat = c("mean", "sd"), verbose = F, 
+  summarizeFeatures(stat = c("mean", "sd"), verbose = F,
+    chunkopts = list(nchunks = if (hpc) 20L else 40L),
     BPPARAM = SnowfastParam(workers = 10L, force.GC = T))
 
 print(plot(m, "mean", 
@@ -143,17 +147,20 @@ for (n in names(mse_list_raw)){
   m <- mse_list_raw[[n]] |>
     smooth(method = "gaussian", width = 5, sd = 0.8) |>
     reduceBaseline(method = "median") |>
-    process(BPPARAM=SnowfastParam(workers = 10L, force.GC = T))
+    process(chunkopts = list(nchunks = if (hpc) 20L else 40L),
+      BPPARAM=SnowfastParam(workers = 10L, force.GC = T))
 
   cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," ESTREFPEAKS\n")
-  esti_ref_peaks <- estimateReferencePeaks(m, 
+  esti_ref_peaks <- estimateReferencePeaks(m,
+    chunkopts = list(nchunks = if (hpc) 20L else 40L),
     BPPARAM = SnowfastParam(workers = 10L, force.GC = T))
 
   cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," RECALIBx2\n")
   m_recalib_picked <- m |> 
               recalibrate(ref = esti_ref_peaks, tolerance = 60, units = "ppm") |> 
               recalibrate(ref = calibrant_mz, tolerance = 60, units = "ppm") |>
-              process(BPPARAM=SnowfastParam(workers = 15L, force.GC = T))
+              process(chunkopts = list(nchunks = if (hpc) 20L else 40L),
+                BPPARAM=SnowfastParam(workers = if (hpc) 15L else 10L, force.GC = T))
   invisible(gc())
 
   cat(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), ": Starting ",n," WRITE\n")
@@ -212,11 +219,13 @@ mse_all_combo <- Reduce(combine, mse_list_rp)
 
 mse_all_picked <- mse_all_combo |>
             peakPick(method="diff", SNR=3) |>
-            process(BPPARAM=SnowfastParam(3L)) 
-            
+            process(chunkopts = list(nchunks = if (hpc) 20L else 60L),
+              BPPARAM=SnowfastParam(3L, force.GC = T))
+
 mse_all_aligned <- mse_all_picked |>
             peakAlign(tolerance = 60, units = "ppm") |>
-            process(BPPARAM=SnowfastParam(3L))
+            process(chunkopts = list(nchunks = if (hpc) 20L else 60L),
+              BPPARAM=SnowfastParam(3L, force.GC = T))
 
 rm(mse_list_rp, mse_all_combo, mse_all_picked)
 invisible(gc())
@@ -234,9 +243,11 @@ Using this function, filter peaks so that only peaks where `freq >= 0.05` in eve
 mse_all_filt <- mse_all_aligned |> 
   filterFeaturesByRunFreq(0.05) |> 
   summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
-    na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |> 
-  summarizeFeatures(stat = c("nnzero", "mean", "sd"), 
-    na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
+    na.rm = T,  chunkopts = list(nchunks = if (hpc) 20L else 60L),
+    BPPARAM=SnowfastParam(workers = 5L, force.GC = T)) |>
+  summarizeFeatures(stat = c("nnzero", "mean", "sd"),
+    na.rm = T, chunkopts = list(nchunks = if (hpc) 20L else 60L),
+    BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
 invisible(gc())
 
 mse_all_filt
@@ -347,10 +358,11 @@ background_feature_approx <- c(1570.6763,
                                 1608.631)
 background_feature_ids <- features(m, mz = background_feature_approx)
 
-m <- summarizeFeatures(m, 
-                       na.rm = T, 
+m <- summarizeFeatures(m,
+                       na.rm = T,
                        verbose = F,
-                       BPPARAM = SnowfastParam(workers = 5L, 
+                       chunkopts = list(nchunks = if (hpc) 20L else 40L),
+                       BPPARAM = SnowfastParam(workers = 5L,
                           force.GC = T))
 ```
 
@@ -878,7 +890,8 @@ Before normalizing, we restrict to non-background pixels and apply a per-pixel q
 m <- m |>
   subsetPixels(tissue_zone != "background") |>
   summarizePixels(stat = c(tic = "sum", nnz = "nnzero"), na.rm = TRUE,
-    BPPARAM = SnowfastParam(workers = 5L))
+    chunkopts = list(nchunks = if (hpc) 20L else 60L),
+    BPPARAM = SnowfastParam(workers = 5L, force.GC = T))
 
 qc <- as.data.table(pData(m))
 qc[, `:=`(lo = quantile(tic, 0.02), hi = quantile(tic, 0.98)), by = run]
@@ -891,11 +904,14 @@ tic_scale <- median(pData(m)$tic, na.rm = TRUE)
 
 normalized <- m |>
         normalize(method = "tic", scale = tic_scale) |>
-        process(BPPARAM=SnowfastParam(workers = 5L)) |>
+        process(chunkopts = list(nchunks = if (hpc) 20L else 60L),
+          BPPARAM=SnowfastParam(workers = 5L, force.GC = T)) |>
         summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"),
-          na.rm = T,  BPPARAM=SnowfastParam(workers = 5L)) |>
+          na.rm = T, chunkopts = list(nchunks = if (hpc) 20L else 60L),
+          BPPARAM=SnowfastParam(workers = 5L, force.GC = T)) |>
         summarizeFeatures(stat = c(sd = "sd", mean = "mean", nnzero = "nnzero"),
-          na.rm = T, BPPARAM=SnowfastParam(workers = 5L))
+          na.rm = T, chunkopts = list(nchunks = if (hpc) 20L else 60L),
+          BPPARAM=SnowfastParam(workers = 5L, force.GC = T))
 ```
 
 Finally, save the normalized dataset.
