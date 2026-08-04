@@ -53,3 +53,11 @@ massive-manifest-vignette-6.txt
 massive_upload_stroke*.log
 .massive_stroke_worker.sh
 massive_upload_vignettes.log
+massive_zip_bundles.sh
+/MassIVE-Zips
+massive_zip*.log
+massive-manifest-data-zips.txt
+massive_upload_datazips*.log
+s3_upload_stroke_zips.sh
+s3_upload_stroke_completed.log
+s3_upload_stroke.log
