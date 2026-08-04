@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ## Install R
 
-This workflow was built with R version 4.5.1. To install R for your computer, follow the directions on the R Project [website](https://www.r-project.org). 
+This workflow was built with R version 4.5.1. To install R for your computer, follow the directions on the R Project [website](https://www.r-project.org).
 
 ## Clone this workflow to your preferred directory
 
@@ -47,93 +47,129 @@ This workflow requires the following packages and their dependencies:
 
 `renv` will automatically detect the `renv.lock` file in the main directory, which will tell it to install the packages above and their dependencies. To commence this process, run the following:
 
-## Download data from S3
-The original dataset in Bruker .d format can be found on MassIVE via ID number: [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb). Due to some technical issues with MassIVE and .imzML files, we have stored the converted raw files and all intermediates created from this analysis in an public Amazon S3 bucket. Files can be downloaded directly over HTTPS — no AWS account, credentials, or additional software is required.
+## Download data
 
-This workflow is written to look for data in the `./Data` directory, with specific steps having sub directories. If these already exist this code will do nothing, otherwise we will create them.
+The data are hosted in two places. The arthritis data for vignettes 1–5 is a reanalysis of MassIVE dataset [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb), accession [RMSV000000712](https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=8d22a971a81c4655a50aacd262a6960e). The mouse stroke data for vignette 6 is hosted in a public Amazon S3 bucket. Both are downloaded directly, with no account or credentials.
 
-### Create local directories
+Downloading is off by default, so knitting this document transfers nothing. To fetch data, set `download` to `TRUE` and, in each section below, set the items you want; the raw spectra of each dataset are selected by default. Intermediates are distributed as zip archives and expanded on download. This requires `curl` and either `unzip` or `tar`, all of which ship with current macOS, Windows, and Linux.
+
 ```{r}
-dirs <- c(
-  file.path(".", "Data"),
-  file.path(".", "Data", "Raw"),
-  file.path(".", "Data", "Filtering-Aggregation"),
-  file.path(".", "Data", "Preprocessing"),
-  file.path(".", "Data", "Simulation-Data"),
-  file.path(".", "Outputs"),
-  file.path(".", "Recreated-Figures")
-)
+download <- FALSE
+```
 
-for (d in dirs) {
-  dir.create(d, showWarnings = FALSE, recursive = TRUE)
+`fetch` downloads a single file, choosing FTPS or HTTPS from the URL, skipping files already present, and retrying transient failures. `login` is passed to the MassIVE FTP server; `anonymous:anonymous` works for the public dataset, and can be set to a MassIVE `username:password` for a private one. `expand` unpacks a zip archive with whichever of `unzip` or `tar` is available, since R's internal unzip cannot read entries larger than 4 GB.
+
+```{r}
+fetch <- function(url, dest, login = "anonymous:anonymous", tries = 5) {
+  if (file.exists(dest)) return(invisible())
+  dir.create(dirname(dest), showWarnings = FALSE, recursive = TRUE)
+  part <- paste0(dest, ".part")
+  for (i in seq_len(tries)) {
+    ok <- tryCatch({
+      if (startsWith(url, "ftp")) {
+        download.file(url, part, method = "curl",
+                      extra = paste("--ssl-reqd --user", shQuote(login)),
+                      mode = "wb", quiet = TRUE)
+      } else {
+        download.file(url, part, method = "libcurl", mode = "wb", quiet = TRUE)
+      }
+      file.exists(part)
+    }, error = function(e) FALSE)
+    if (isTRUE(ok)) break
+    unlink(part)
+    Sys.sleep(2 * i)
+  }
+  if (!file.exists(part)) stop("download failed: ", url)
+  file.rename(part, dest)
+}
+
+expand <- function(zip, exdir = ".") {
+  if (nzchar(Sys.which("unzip"))) {
+    unzip(zip, exdir = exdir, unzip = "unzip")
+  } else if (nzchar(Sys.which("tar"))) {
+    system2("tar", c("-xf", shQuote(zip), "-C", shQuote(exdir)))
+  } else {
+    stop("Need 'unzip' or 'tar' to expand ", zip)
+  }
 }
 ```
 
-### Select which data to download
+### Arthritis data and Simulations (Vignettes 1–5 and Simulation 1-2)
 
-You do not need to download everything. Set any of the following to `FALSE` to skip that directory. At minimum, you will need `Raw` and `Simulation-Data` to run the full workflow from scratch, or the later intermediates to reproduce specific steps. T
+Converted raw spectra and the intermediate result of each step. `Raw` and `Simulation-Data` are plain files; the others are zip archives that expand into `Data/Preprocessing` or `Data/Filtering-Aggregation`. Set an entry to `TRUE` to download it.
 
 ```{r}
-download_dirs <- list(
-  "Data/Raw"                        = TRUE,
-  "Data/Preprocessing/Smoothed-BLR-Recalibrated" = TRUE,
-  "Data/Preprocessing/Individual-Picked-Aligned-Filtered" = TRUE,
-  "Data/Preprocessing/Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML" = TRUE,
-  "Data/Preprocessing/normalized.imzML" = TRUE,
-  "Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML" = TRUE,
-  "Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML" = TRUE,
-  "Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered50.imzML" = TRUE,
-  "Data/Simulation-Data"            = TRUE
+arthritis_url <- "ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-08-03_ebrogers_8d22a971"
+massive_login <- "anonymous:anonymous"
+
+arthritis <- c(
+  "Raw"                                                    = TRUE,
+  "Individual-Picked-Aligned-Filtered"                     = FALSE,
+  "Recalibrated-Picked-Aligned-FreqFiltered05perRun"       = FALSE,
+  "normalized"                                             = FALSE,
+  "Preprocessed-NSFiltered"                                = FALSE,
+  "Preprocessed-NSFiltered-Aggregated"                     = FALSE,
+  "Preprocessed-NSFiltered-Aggregated-CartilageFiltered50" = FALSE,
+  "Simulation-Data"                                        = TRUE
 )
 ```
 
-### Download helper functions
-
-The following functions list and download files from the public S3 bucket using only base R. No additional packages are needed.
-
 ```{r}
-bucket    <- "preprint-msi-arthtitis-data"
-base_url  <- paste0("https://", bucket, ".s3.amazonaws.com")
-source("S3Utilities.R")
-```
+if (download) {
+  samples <- c("6891a_lat_oa", "6891b_med_oa", "6908a_lat_oa", "6908b_med_oa",
+               "6911a_lat_oa", "6911b_med_oa", "6919a_med_cad", "6919b_lat_cad",
+               "6920a_lat_cad", "6920b_med_cad", "6924a_lat_cad", "6924b_med_cad",
+               "6938a_med_cad", "6938b_lat_cad", "6944a_med_cad", "6944b_lat_cad",
+               "6949a_lat_oa", "6949a_med_oa", "6954a_lat_oa", "6954b_med_oa")
 
-### Run the download
-The following code iterates over your selected directories, lists the files in each from the S3 bucket, and downloads them. Change `dry_run` to `FALSE` to download the files selected from above.
-
-```{r}
-dry_run <- TRUE
-
-selected <- names(download_dirs)[unlist(download_dirs)]
-
-for (prefix in selected) {
-  message("\n--- Listing: ", prefix, " ---")
-  query_prefix <- ifelse(grepl("/$", prefix), prefix, paste0(prefix, "/"))
-  objects <- s3_list_objects(base_url, query_prefix)
-
-  if (nrow(objects) == 0) {
-    message("  No files found for prefix: ", prefix)
-    next
+  if (isTRUE(arthritis["Raw"])) {
+    for (f in paste0(rep(samples, each = 2), c(".ibd", ".imzML"))) {
+      fetch(paste0(arthritis_url, "/raw/", f), file.path("Data", "Raw", f), massive_login)
+    }
   }
 
-  total_size <- sum(objects$size)
-  already_exist <- vapply(objects$key, function(k) file.exists(file.path(".", k)), logical(1))
-  n_skip <- sum(already_exist)
-  n_todo <- nrow(objects) - n_skip
+  if (isTRUE(arthritis["Simulation-Data"])) {
+    fetch(paste0(arthritis_url, "/metadata/sim_list_original.RData"),
+          file.path("Data", "Simulation-Data", "sim_list_original.RData"), massive_login)
+  }
 
-  message(sprintf("  %d files (%s total), %d to download, %d already present",
-                  nrow(objects), human_size(total_size), n_todo, n_skip))
+  for (z in setdiff(names(which(arthritis)), c("Raw", "Simulation-Data"))) {
+    tmp <- file.path(tempdir(), paste0(z, ".zip"))
+    fetch(paste0(arthritis_url, "/raw/", z, ".zip"), tmp, massive_login)
+    expand(tmp)
+    unlink(tmp)
+  }
+}
+```
 
-  for (i in seq_len(nrow(objects))) {
-    key <- objects$key[i]
-    size <- objects$size[i]
-    if (file.exists(file.path(".", key))) next
+### Mouse stroke data (vignette 6)
 
-    if (dry_run) {
-      message(sprintf("  [DRY RUN %d/%d] would download: %s (%s)",
-                      i, nrow(objects), basename(key), human_size(size)))
-    } else {
-      s3_download_file(base_url, key, dest_dir = ".")
-    }
+Converted raw spectra and intermediates for the stroke case study, all zip archives that expand into `Mouse-Stroke-Data`. Set an entry to `TRUE` to download it.
+
+```{r}
+stroke_url <- "public URL available soon"
+
+stroke <- c(
+  "Raw_imzML"              = TRUE,
+  "Recalibrated"           = FALSE,
+  "Aligned"                = FALSE,
+  "Analytes-Aligned"       = FALSE,
+  "IS-Aligned"             = FALSE,
+  "Analytes-IS-Aligned"    = FALSE,
+  "Aligned-Tissue-ROIs"    = FALSE,
+  "IS-Aligned-Tissue-ROIS" = FALSE,
+  "IS-normalized"          = FALSE,
+  "IS-normalized-filtered" = FALSE
+)
+```
+
+```{r}
+if (download) {
+  for (z in names(which(stroke))) {
+    tmp <- file.path(tempdir(), paste0(z, ".zip"))
+    fetch(paste0(stroke_url, "/", z, ".zip"), tmp)
+    expand(tmp)
+    unlink(tmp)
   }
 }
 ```
