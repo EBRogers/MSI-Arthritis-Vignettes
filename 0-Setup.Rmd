@@ -32,7 +32,7 @@ Now we can begin setting up our workspace and installing dependencies using `ren
 
 ```
 install.packages("renv")
-renv::init(bioconductor = TRUE)
+renv::init(bioconductor = "3.23")
 ```
 
 This workflow requires the following packages and their dependencies:
