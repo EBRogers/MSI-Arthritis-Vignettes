@@ -386,129 +386,195 @@ libraries called virtual environments similar to python’s
 environments for each project. However, in order to set up a virtual
 environment, we need to first install <code>renv</code> on the system
 library.</p>
-<pre><code>install.packages(&quot;renv&quot;)
-renv::init(bioconductor = TRUE)</code></pre>
+<pre class="r"><code>install.packages(&quot;renv&quot;)</code></pre>
 <p>This workflow requires the following packages and their
 dependencies:</p>
 <ul>
-<li>Cardinal</li>
-<li>dplyr, tibble, tidyr, and ggplot2</li>
+<li>Cardinal (installs its matter and BiocParallel backends)</li>
+<li>dplyr, tibble, tidyr, ggplot2, readr, stringr</li>
 <li>data.table</li>
+<li>matrixStats</li>
 <li>fuzzyjoin</li>
-<li>patchwork, ggpubr, ggrepel</li>
-<li>lmerTest, nlme</li>
+<li>ggpubr, ggrepel, scales</li>
+<li>RColorBrewer, VennDiagram</li>
+<li>lmerTest, lme4, nlme</li>
 <li>emmeans</li>
+<li>broom, broom.mixed</li>
+<li>kableExtra</li>
+<li>knitr, rmarkdown</li>
 </ul>
+<div id="creating-a-renv-and-installing-packages-from-the-renv.lock-file" class="section level3">
+<h3>Creating a <code>renv</code> and installing packages from the
+<code>renv.lock</code> file</h3>
 <p><code>renv</code> will automatically detect the
 <code>renv.lock</code> file in the main directory, which will tell it to
 install the packages above and their dependencies. To commence this
 process, run the following:</p>
+<pre class="r"><code>renv::init(bioconductor = &quot;3.23&quot;)</code></pre>
 </div>
-<div id="download-data-from-s3" class="section level2">
-<h2>Download data from S3</h2>
-<p>The original dataset in Bruker .d format can be found on MassIVE via
-ID number: <a href="https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb">MSV000094448</a>.
-Due to some technical issues with MassIVE and .imzML files, we have
-stored the converted raw files and all intermediates created from this
-analysis in an public Amazon S3 bucket. Files can be downloaded directly
-over HTTPS — no AWS account, credentials, or additional software is
-required.</p>
-<p>This workflow is written to look for data in the <code>./Data</code>
-directory, with specific steps having sub directories. If these already
-exist this code will do nothing, otherwise we will create them.</p>
-<div id="create-local-directories" class="section level3">
-<h3>Create local directories</h3>
-<pre class="r"><code>dirs &lt;- c(
-  file.path(&quot;.&quot;, &quot;Data&quot;),
-  file.path(&quot;.&quot;, &quot;Data&quot;, &quot;Raw&quot;),
-  file.path(&quot;.&quot;, &quot;Data&quot;, &quot;Filtering-Aggregation&quot;),
-  file.path(&quot;.&quot;, &quot;Data&quot;, &quot;Preprocessing&quot;),
-  file.path(&quot;.&quot;, &quot;Data&quot;, &quot;Simulation-Data&quot;),
-  file.path(&quot;.&quot;, &quot;Outputs&quot;),
-  file.path(&quot;.&quot;, &quot;Recreated-Figures&quot;)
-)
+<div id="creating-a-renv-and-letting-renv-detect-and-install-used-packages" class="section level3">
+<h3>Creating a <code>renv</code> and letting <code>renv</code> detect
+and install used packages</h3>
+<p><strong>If the <code>renv.lock</code> is not present</strong>,
+<code>renv</code> can automatically detect and install the required
+packages. In order to do this in <code>.Rmd</code> files
+<code>renv</code> needs <code>yaml</code>. <strong>Keep in mind that
+this method does not preserve package versions, thus may not produce
+expected behavior.</strong></p>
+<pre class="r"><code>install.packages(&quot;yaml&quot;)
+renv::init(bioconductor = &quot;3.23&quot;)</code></pre>
+</div>
+<div id="creating-a-renv-and-installing-packages-manually" class="section level3">
+<h3>Creating a <code>renv</code> and installing packages manually</h3>
+<p>Sometimes we need to install the packages ourselves manually.
+<strong>Keep in mind that this method does not preserve package
+versions, thus may not produce expected behavior.</strong></p>
+<pre class="r"><code>renv::init(bioconductor = &quot;3.23&quot;, bare = T)
+renv::activate() # or restart R
 
-for (d in dirs) {
-  dir.create(d, showWarnings = FALSE, recursive = TRUE)
-}</code></pre>
-</div>
-<div id="select-which-data-to-download" class="section level3">
-<h3>Select which data to download</h3>
-<p>You do not need to download everything. Set any of the following to
-<code>FALSE</code> to skip that directory. At minimum, you will need
-<code>Raw</code> and <code>Simulation-Data</code> to run the full
-workflow from scratch, or the later intermediates to reproduce specific
-steps. T</p>
-<pre class="r"><code>download_dirs &lt;- list(
-  &quot;Data/Raw&quot;                        = TRUE,
-  &quot;Data/Preprocessing/Smoothed-BLR-Recalibrated&quot; = TRUE,
-  &quot;Data/Preprocessing/Individual-Picked-Aligned-Filtered&quot; = TRUE,
-  &quot;Data/Preprocessing/Smoothed-BLR-Recalibrated-Picked-Aligned-FreqFiltered05perRun.imzML&quot; = TRUE,
-  &quot;Data/Preprocessing/normalized.imzML&quot; = TRUE,
-  &quot;Data/Filtering-Aggregation/Preprocessed-NSFiltered.imzML&quot; = TRUE,
-  &quot;Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated.imzML&quot; = TRUE,
-  &quot;Data/Filtering-Aggregation/Preprocessed-NSFiltered-Aggregated-CartilageFiltered25.imzML&quot; = TRUE,
-  &quot;Data/Simulation-Data&quot;            = TRUE
-)</code></pre>
-</div>
-<div id="download-helper-functions" class="section level3">
-<h3>Download helper functions</h3>
-<p>The following functions list and download files from the public S3
-bucket using only base R. No additional packages are needed.</p>
-<pre class="r"><code>bucket    &lt;- &quot;preprint-msi-arthtitis-data&quot;
-base_url  &lt;- paste0(&quot;https://&quot;, bucket, &quot;.s3.amazonaws.com&quot;)
-source(&quot;S3Utilities.R&quot;)</code></pre>
-</div>
-<div id="run-the-download" class="section level3">
-<h3>Run the download</h3>
-<p>The following code iterates over your selected directories, lists the
-files in each from the S3 bucket, and downloads them.</p>
-<pre><code>selected &lt;- names(download_dirs)[unlist(download_dirs)]
+renv::install(&quot;bioc::Cardinal&quot;)
 
-for (prefix in selected) {
-  message(&quot;\n--- Listing: &quot;, prefix, &quot; ---&quot;)
-  
-  # Ensure the prefix ends with / so we only get objects inside it
-  query_prefix &lt;- ifelse(grepl(&quot;/$&quot;, prefix), prefix, paste0(prefix, &quot;/&quot;))
-  objects &lt;- s3_list_objects(base_url, query_prefix)
-  
-  if (nrow(objects) == 0) {
-    message(&quot;  No files found for prefix: &quot;, prefix)
-    next
+packages &lt;- c(&quot;dplyr&quot;, &quot;tibble&quot;, &quot;tidyr&quot;, &quot;ggplot2&quot;, &quot;readr&quot;, &quot;stringr&quot;,
+              &quot;data.table&quot;, &quot;matrixStats&quot;, &quot;fuzzyjoin&quot;,
+              &quot;ggpubr&quot;, &quot;ggrepel&quot;, &quot;scales&quot;,
+              &quot;RColorBrewer&quot;, &quot;VennDiagram&quot;,
+              &quot;lmerTest&quot;, &quot;lme4&quot;, &quot;nlme&quot;,
+              &quot;emmeans&quot;, &quot;broom&quot;, &quot;broom.mixed&quot;,
+              &quot;kableExtra&quot;, &quot;knitr&quot;, &quot;rmarkdown&quot;)
+
+renv::install(packages)</code></pre>
+</div>
+</div>
+<div id="download-data" class="section level2">
+<h2>Download data</h2>
+<p>The data are hosted in two places. The arthritis data for vignettes
+1–5 is a reanalysis of MassIVE dataset <a href="https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb">MSV000094448</a>,
+accession <a href="https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=8d22a971a81c4655a50aacd262a6960e">RMSV000000712</a>.
+The mouse stroke data for vignette 6 is hosted in a public Amazon S3
+bucket. Both are downloaded directly, with no account or
+credentials.</p>
+<p>Downloading is off by default, so knitting this document transfers
+nothing. To fetch data, set <code>download</code> to <code>TRUE</code>
+and, in each section below, set the items you want; the raw spectra of
+each dataset are selected by default. Intermediates are distributed as
+zip archives and expanded on download. This requires <code>curl</code>
+and either <code>unzip</code> or <code>tar</code>, all of which ship
+with current macOS, Windows, and Linux.</p>
+<pre class="r"><code>download &lt;- FALSE</code></pre>
+<p><code>fetch</code> downloads a single file, choosing FTPS or HTTPS
+from the URL, skipping files already present, and retrying transient
+failures. <code>login</code> is passed to the MassIVE FTP server;
+<code>anonymous:anonymous</code> works for the public dataset, and can
+be set to a MassIVE <code>username:password</code> for a private one.
+<code>expand</code> unpacks a zip archive with whichever of
+<code>unzip</code> or <code>tar</code> is available, since R’s internal
+unzip cannot read entries larger than 4 GB.</p>
+<pre class="r"><code>fetch &lt;- function(url, dest, login = &quot;anonymous:anonymous&quot;, tries = 5) {
+  if (file.exists(dest)) return(invisible())
+  dir.create(dirname(dest), showWarnings = FALSE, recursive = TRUE)
+  part &lt;- paste0(dest, &quot;.part&quot;)
+  for (i in seq_len(tries)) {
+    ok &lt;- tryCatch({
+      if (startsWith(url, &quot;ftp&quot;)) {
+        download.file(url, part, method = &quot;curl&quot;,
+                      extra = paste(&quot;--ssl-reqd --user&quot;, shQuote(login)),
+                      mode = &quot;wb&quot;, quiet = TRUE)
+      } else {
+        download.file(url, part, method = &quot;libcurl&quot;, mode = &quot;wb&quot;, quiet = TRUE)
+      }
+      file.exists(part)
+    }, error = function(e) FALSE)
+    if (isTRUE(ok)) break
+    unlink(part)
+    Sys.sleep(2 * i)
   }
-  
-  total_size &lt;- sum(objects$size)
-  
-  # Check how many already exist locally
-  already_exist &lt;- vapply(objects$key, function(k) {
-    file.exists(file.path(&quot;.&quot;, k))
-  }, logical(1))
-  n_skip &lt;- sum(already_exist)
-  n_todo &lt;- nrow(objects) - n_skip
-  
-  message(sprintf(&quot;  %d files (%s total), %d to download, %d already present&quot;,
-                  nrow(objects), human_size(total_size), n_todo, n_skip))
-  
-  if (n_todo == 0) {
-    message(&quot;  All files already downloaded, skipping.&quot;)
-    next
-  }
-  
-  for (i in seq_len(nrow(objects))) {
-    key  &lt;- objects$key[i]
-    size &lt;- objects$size[i]
-    
-    if (file.exists(file.path(&quot;.&quot;, key))) next
-    
-    message(sprintf(&quot;  [%d/%d] %s (%s)&quot;,
-                    i, nrow(objects), basename(key), human_size(size)))
-    s3_download_file(base_url, key, dest_dir = &quot;.&quot;)
-  }
-  
-  message(&quot;  Done: &quot;, prefix)
+  if (!file.exists(part)) stop(&quot;download failed: &quot;, url)
+  file.rename(part, dest)
 }
 
-message(&quot;\nAll downloads complete.&quot;)</code></pre>
+expand &lt;- function(zip, exdir = &quot;.&quot;) {
+  if (nzchar(Sys.which(&quot;unzip&quot;))) {
+    unzip(zip, exdir = exdir, unzip = &quot;unzip&quot;)
+  } else if (nzchar(Sys.which(&quot;tar&quot;))) {
+    system2(&quot;tar&quot;, c(&quot;-xf&quot;, shQuote(zip), &quot;-C&quot;, shQuote(exdir)))
+  } else {
+    stop(&quot;Need &#39;unzip&#39; or &#39;tar&#39; to expand &quot;, zip)
+  }
+}</code></pre>
+<div id="arthritis-data-and-simulations-vignettes-15-and-simulation-1-2" class="section level3">
+<h3>Arthritis data and Simulations (Vignettes 1–5 and Simulation
+1-2)</h3>
+<p>Converted raw spectra and the intermediate result of each step.
+<code>Raw</code> and <code>Simulation-Data</code> are plain files; the
+others are zip archives that expand into <code>Data/Preprocessing</code>
+or <code>Data/Filtering-Aggregation</code>. Set an entry to
+<code>TRUE</code> to download it.</p>
+<pre class="r"><code>arthritis_url &lt;- &quot;ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-08-03_ebrogers_8d22a971&quot;
+massive_login &lt;- &quot;anonymous:anonymous&quot;
+
+arthritis &lt;- c(
+  &quot;Raw&quot;                                                    = TRUE,
+  &quot;Individual-Picked-Aligned-Filtered&quot;                     = FALSE,
+  &quot;Recalibrated-Picked-Aligned-FreqFiltered05perRun&quot;       = FALSE,
+  &quot;normalized&quot;                                             = FALSE,
+  &quot;Preprocessed-NSFiltered&quot;                                = FALSE,
+  &quot;Preprocessed-NSFiltered-Aggregated&quot;                     = FALSE,
+  &quot;Preprocessed-NSFiltered-Aggregated-CartilageFiltered50&quot; = FALSE,
+  &quot;Simulation-Data&quot;                                        = TRUE
+)</code></pre>
+<pre class="r"><code>if (download) {
+  samples &lt;- c(&quot;6891a_lat_oa&quot;, &quot;6891b_med_oa&quot;, &quot;6908a_lat_oa&quot;, &quot;6908b_med_oa&quot;,
+               &quot;6911a_lat_oa&quot;, &quot;6911b_med_oa&quot;, &quot;6919a_med_cad&quot;, &quot;6919b_lat_cad&quot;,
+               &quot;6920a_lat_cad&quot;, &quot;6920b_med_cad&quot;, &quot;6924a_lat_cad&quot;, &quot;6924b_med_cad&quot;,
+               &quot;6938a_med_cad&quot;, &quot;6938b_lat_cad&quot;, &quot;6944a_med_cad&quot;, &quot;6944b_lat_cad&quot;,
+               &quot;6949a_lat_oa&quot;, &quot;6949a_med_oa&quot;, &quot;6954a_lat_oa&quot;, &quot;6954b_med_oa&quot;)
+
+  if (isTRUE(arthritis[&quot;Raw&quot;])) {
+    for (f in paste0(rep(samples, each = 2), c(&quot;.ibd&quot;, &quot;.imzML&quot;))) {
+      fetch(paste0(arthritis_url, &quot;/raw/&quot;, f), file.path(&quot;Data&quot;, &quot;Raw&quot;, f), massive_login)
+    }
+  }
+
+  if (isTRUE(arthritis[&quot;Simulation-Data&quot;])) {
+    fetch(paste0(arthritis_url, &quot;/metadata/sim_list_original.RData&quot;),
+          file.path(&quot;Data&quot;, &quot;Simulation-Data&quot;, &quot;sim_list_original.RData&quot;), massive_login)
+  }
+
+  for (z in setdiff(names(which(arthritis)), c(&quot;Raw&quot;, &quot;Simulation-Data&quot;))) {
+    tmp &lt;- file.path(tempdir(), paste0(z, &quot;.zip&quot;))
+    fetch(paste0(arthritis_url, &quot;/raw/&quot;, z, &quot;.zip&quot;), tmp, massive_login)
+    expand(tmp)
+    unlink(tmp)
+  }
+}</code></pre>
+</div>
+<div id="mouse-stroke-data-vignette-6" class="section level3">
+<h3>Mouse stroke data (vignette 6)</h3>
+<p>Converted raw spectra and intermediates for the stroke case study,
+all zip archives that expand into <code>Mouse-Stroke-Data</code>. Set an
+entry to <code>TRUE</code> to download it.</p>
+<pre class="r"><code>stroke_url &lt;- &quot;public URL available soon&quot;
+
+stroke &lt;- c(
+  &quot;Raw_imzML&quot;              = TRUE,
+  &quot;Recalibrated&quot;           = FALSE,
+  &quot;Aligned&quot;                = FALSE,
+  &quot;Analytes-Aligned&quot;       = FALSE,
+  &quot;IS-Aligned&quot;             = FALSE,
+  &quot;Analytes-IS-Aligned&quot;    = FALSE,
+  &quot;Aligned-Tissue-ROIs&quot;    = FALSE,
+  &quot;IS-Aligned-Tissue-ROIS&quot; = FALSE,
+  &quot;IS-normalized&quot;          = FALSE,
+  &quot;IS-normalized-filtered&quot; = FALSE
+)</code></pre>
+<pre class="r"><code>if (download) {
+  for (z in names(which(stroke))) {
+    tmp &lt;- file.path(tempdir(), paste0(z, &quot;.zip&quot;))
+    fetch(paste0(stroke_url, &quot;/&quot;, z, &quot;.zip&quot;), tmp)
+    expand(tmp)
+    unlink(tmp)
+  }
+}</code></pre>
 </div>
 </div>
 

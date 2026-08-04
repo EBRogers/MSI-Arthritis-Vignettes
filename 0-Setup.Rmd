@@ -30,22 +30,62 @@ R
 
 Now we can begin setting up our workspace and installing dependencies using `renv`. `renv` sets up isolated package libraries called virtual environments similar to python's `venv`. It's best practice to use a dedicated virtual environments for each project. However, in order to set up a virtual environment, we need to first install `renv` on the system library.
 
-```
+```{r, eval=FALSE}
 install.packages("renv")
-renv::init(bioconductor = "3.23")
 ```
 
 This workflow requires the following packages and their dependencies:
 
-- Cardinal
-- dplyr, tibble, tidyr, and ggplot2
+- Cardinal (installs its matter and BiocParallel backends)
+- dplyr, tibble, tidyr, ggplot2, readr, stringr
 - data.table
+- matrixStats
 - fuzzyjoin
-- patchwork, ggpubr, ggrepel
-- lmerTest, nlme
+- ggpubr, ggrepel, scales
+- RColorBrewer, VennDiagram
+- lmerTest, lme4, nlme
 - emmeans
+- broom, broom.mixed
+- kableExtra
+- knitr, rmarkdown
+
+### Creating a `renv` and installing packages from the `renv.lock` file
 
 `renv` will automatically detect the `renv.lock` file in the main directory, which will tell it to install the packages above and their dependencies. To commence this process, run the following:
+
+```{r, eval=FALSE}
+renv::init(bioconductor = "3.23")
+```
+
+### Creating a `renv` and letting `renv` detect and install used packages
+
+**If the `renv.lock` is not present**, `renv` can automatically detect and install the required packages. In order to do this in `.Rmd` files `renv` needs `yaml`. **Keep in mind that this method does not preserve package versions, thus may not produce expected behavior.**
+
+```{r, eval=FALSE}
+install.packages("yaml")
+renv::init(bioconductor = "3.23")
+```
+
+### Creating a `renv` and installing packages manually
+
+Sometimes we need to install the packages ourselves manually. **Keep in mind that this method does not preserve package versions, thus may not produce expected behavior.**
+```{r, eval = FALSE}
+renv::init(bioconductor = "3.23", bare = T)
+renv::activate() # or restart R
+
+renv::install("bioc::Cardinal")
+
+packages <- c("dplyr", "tibble", "tidyr", "ggplot2", "readr", "stringr",
+              "data.table", "matrixStats", "fuzzyjoin",
+              "ggpubr", "ggrepel", "scales",
+              "RColorBrewer", "VennDiagram",
+              "lmerTest", "lme4", "nlme",
+              "emmeans", "broom", "broom.mixed",
+              "kableExtra", "knitr", "rmarkdown")
+
+renv::install(packages)
+```
+
 
 ## Download data
 
