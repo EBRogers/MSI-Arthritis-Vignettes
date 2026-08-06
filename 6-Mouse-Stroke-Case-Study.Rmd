@@ -75,6 +75,9 @@ RNGkind("L'Ecuyer-CMRG")
 
 setCardinalVerbose(verbose = FALSE)
 gcinfo(verbose = FALSE)
+
+profile <- "laptop"
+hpc <- profile == "hpc"
 ```
 
 ## Load metadata
@@ -139,10 +142,10 @@ bp <- SnowfastParam(workers = 10L, force.GC = T)
 for (sn in samp$short_name) {
     cat("Starting", sn, "\n")
     est_ref_peaks <- msa.raw[[sn]] |>
-		estimateReferencePeaks(BPPARAM = bp)
+		estimateReferencePeaks(chunkopts = list(nchunks = if (hpc) 20L else 60L), BPPARAM = bp)
     msa.raw[[sn]] |>
 	    recalibrate(ref = est_ref_peaks, tolerance = 10, units = "ppm") |>
-        process(BPPARAM = bp) |>
+        process(chunkopts = list(nchunks = if (hpc) 20L else 60L), BPPARAM = bp) |>
         writeMSIDataSafe(file.path(recalib.data.path, paste0(sn, ".imzML")))
 }
 
@@ -178,7 +181,7 @@ bp <- SnowfastParam(workers = 8L, force.GC = T)
 for (sn in samp$short_name) {
     readMSIData(file.path(recalib.data.path, paste0(sn, ".imzML"))) |>
     peakAlign(ref = all.peaks.to.align) |>
-    process(BPPARAM = bp) |>
+    process(chunkopts = list(nchunks = if (hpc) 20L else 40L), BPPARAM = bp) |>
     writeMSIDataSafe(file.path(aligned.data.path, paste0(sn, ".imzML")))
 }
 invisible(gc())

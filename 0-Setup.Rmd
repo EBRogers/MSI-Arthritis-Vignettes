@@ -214,7 +214,7 @@ if (download) {
 
 Converted raw spectra and intermediates for the stroke case study, all zip archives that expand into `Mouse-Stroke-Data`. Set an entry to `TRUE` to download it.
 
-```{r}
+```{r, eval = F}
 stroke_url <- "public URL available soon"
 
 stroke <- c(
