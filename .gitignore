@@ -61,3 +61,4 @@ massive_upload_datazips*.log
 s3_upload_stroke_zips.sh
 s3_upload_stroke_completed.log
 s3_upload_stroke.log
+s3_upload.log
