@@ -3,6 +3,7 @@
 .RData
 .Ruserdata
 .Rprofile
+.claude
 /.vscode
 /renv
 /Data
@@ -43,6 +44,7 @@ afternorm.csv
 /Recreated-Figures_OLD
 render-all-full-run.log
 render-all.log
+*.log
 
 .massive-credentials
 massive_upload_vignettes.sh
@@ -62,3 +64,6 @@ s3_upload_stroke_zips.sh
 s3_upload_stroke_completed.log
 s3_upload_stroke.log
 s3_upload.log
+massive_upload_stroke_zips_tmux.sh
+massive-manifest-stroke-zips.txt
+Rplots.pdf

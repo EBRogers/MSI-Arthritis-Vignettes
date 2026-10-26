@@ -107,7 +107,8 @@ print(plot(m, "mean",
      grid = F))
 
 dev.off()
-
+```
+```{r fig-peakpicking-cv, warning=FALSE, message=FALSE, echo=TRUE}
 as_tibble(fData(m)) |> 
   filter(mean != 0 | sd != 0) |>
   mutate(cv = sd/mean) |>
@@ -203,45 +204,92 @@ for (n in names(mse_list_rp)) {
 }
 ```
 
-This chain conducts multiple steps, yielding a single `MSImagingExperiment` object containing a run for every sample, all with a shared mass axis.
+The end output of the intial preprocessing is a list of peaks that will define the shared mass axis for all samples. We will then do a second picking and realignment to select and align these peaks.
 
 - `combine` groups samples into a single `MSImagingArrays` object.
 - `peakPick` performs peak picking on all spectra with the same method and signal-to-noise ratio (SNR) across all samples
 - `peakAlign` centroids the picked peaks, creating the unified mass axis for all samples. This also converts the `MSImagingArrays` to a `MSImagingExperiment`
 - `process` actually executes the picking and alignment steps.
 
-The final step, changing the `spectrumRepresentation`, ensures that Cardinal writes the object to disk as centroided. (This is not always necessary and is done to ensure backwards compatibility with previous versions of Cardinal v3.)
-
-After these steps, the resulting combined image will have an orders-of-magnitude smaller memory footprint, as we are no longer maintaining separate mass axes for each spectrum and non-centroided peaks. The object should easily fit in memory.
-
-```{r}
+```{r peak-pick}
 mse_all_combo <- Reduce(combine, mse_list_rp)
 
 mse_all_picked <- mse_all_combo |>
-            peakPick(method="diff", SNR=3) |>
+            peakPick(method="diff", SNR=4) |>
             process(chunkopts = list(nchunks = if (hpc) 20L else 60L),
               BPPARAM=SnowfastParam(3L, force.GC = T))
 
-mse_all_aligned <- mse_all_picked |>
+mse_all_picked_aligned <- mse_all_picked |>
             peakAlign(tolerance = 60, units = "ppm") |>
             process(chunkopts = list(nchunks = if (hpc) 20L else 60L),
               BPPARAM=SnowfastParam(3L, force.GC = T))
 
-rm(mse_list_rp, mse_all_combo, mse_all_picked)
+rm(mse_list_rp, mse_all_picked)
+
 invisible(gc())
+```
+
+Cardinal automatically calculates `freq` during peak picking, but this metric is computed across all runs. In our workflow, we recommend filtering peaks by non-zero frequency on a per-run basis. The function `filterFeaturesByRunFreq` in `Utilities.R` can do this.
+
+Using this function, filter peaks so that only peaks where `freq >= 0.05` in every run are retained. The m/z values of the retained peaks are our reference peak list.
+
+```{r reference-peaks}
+ref_mz <- mse_all_picked_aligned |>
+  filterFeaturesByRunFreq(0.05) |>
+  mz()
+
+rm(mse_all_picked_aligned)
+invisible(gc())
+```
+
+`peakPick` works one spectrum at a time. In each pixel, it keeps only the peaks whose signal-to-noise ratio (SNR) passes the cutoff, and it drops the rest. In this scenario, running `peakAlign` will be censor (zero) features in every pixel where that feature's SNR fell below the cutoff, even if the analyte was present.
+
+This censors low intensities and adds many zeros to the data. To avoid this, we use the picked peaks only to define the list of m/z values, the reference peaks. We then go back to the recalibrated spectra from before peak picking and measure every pixel at every reference peak.
+
+`peakProcess` with `ref = ref_mz` does this measurement. In each pixel, it first finds every local maximum in the spectrum, meaning every point that is higher than its neighbors. It does not apply an SNR cutoff. Then, for each reference peak, it takes the local maximum closest to the reference m/z, as long as it lies within the tolerance, and records the height of that peak. If no local maximum lies within the tolerance, the value is zero. Where the original peak picking found a peak, this gives the same height, because both steps report the top of the same peak.
+
+We use the same 60 ppm tolerance as in `peakAlign` above. Even after recalibration, the top of a peak can sit tens of ppm away from its reference m/z, and the size of that shift differs from run to run. A smaller tolerance would set those peaks to zero. That would again remove real signal, and it would remove more in some runs than in others.
+
+Two notes on this step:
+
+- When two reference peaks are less than about twice the tolerance apart, both can take the same local maximum and get the same value in that pixel. The original peak-picked data behave the same way, because `peakAlign` also lets one picked peak fill every reference peak within the tolerance.
+- `peakAlign(ref = ref_mz)` is not a substitute here. `peakAlign` does not look for peaks. It takes the single data point closest to each reference m/z. In profile (unpicked) spectra, that point is often on the side of the peak instead of at its top, so the value comes out too low.
+
+The final step, changing the `spectrumRepresentation`, ensures that Cardinal writes the object to disk as centroided. (This is not always necessary and is done to ensure backwards compatibility with previous versions of Cardinal v3.)
+
+```{r align-to-reference}
+mse_all_aligned <- mse_all_combo |>
+            peakProcess(ref = ref_mz, tolerance = 60, units = "ppm",
+              chunkopts = list(nchunks = if (hpc) 20L else 60L),
+              BPPARAM = SnowfastParam(3L, force.GC = T))
 
 # This is likely unnecessary, but may prevent 
 # issues with older versions of Cardinal
 experimentData(mse_all_aligned)$spectrumRepresentation <- "centroid spectrum"
 ```
 
-Cardinal automatically calculates `freq` during peak picking, but this metric is computed across all runs. In our workflow, we recommend filtering peaks by non-zero frequency on a per-run basis. The function `filterFeaturesByRunFreq` in `Utilities.R` can do this.
+`peakProcess` reads every recalibrated spectrum once and keeps the result in memory: one value per pixel for each of the `r length(ref_mz)` reference peaks (about 8 GB for this dataset). We write this image to disk and reload it, so that later steps read it from the file and the memory can be freed.
 
-Using this function, filter peaks so that only peaks where `freq >= 0.05` in every run are retained.
+```{r write-reload-aligned}
+writeMSIDataSafe(mse_all_aligned,
+  file.path("Data", 
+    "Preprocessing", 
+    "Recalibrated-Aligned-To-Picked-Peaks.imzML"),
+  chunkopts = list(nchunks = if (hpc) 20L else 60L),
+  BPPARAM=SnowfastParam(workers = 8L, force.GC = T))
+
+rm(mse_all_combo, mse_all_aligned)
+invisible(gc())
+
+mse_all_aligned <- readMSIData(file.path("Data", 
+    "Preprocessing", 
+    "Recalibrated-Aligned-To-Picked-Peaks.imzML"))
+```
+
+After these steps, the resulting combined image will have an orders-of-magnitude smaller memory footprint, as we are no longer maintaining separate mass axes for each spectrum and non-centroided peaks. The object should easily fit in memory.
 
 ```{r combine-align}
 mse_all_filt <- mse_all_aligned |> 
-  filterFeaturesByRunFreq(0.05) |> 
   summarizePixels(stat = c(tic = "sum", mean = "mean", nnzero = "nnzero"), 
     na.rm = T,  chunkopts = list(nchunks = if (hpc) 20L else 60L),
     BPPARAM=SnowfastParam(workers = 5L, force.GC = T)) |>
@@ -253,7 +301,7 @@ invisible(gc())
 mse_all_filt
 ```
 
-Write the uniform, peak-picked image to disk.
+Write the combined image, now with the pixel and feature summaries, to disk.
 
 ```{r write-combined}
 writeMSIDataSafe(mse_all_filt,

@@ -172,16 +172,21 @@ c13.is.lipids <- c(428.299845, 499.355465, 596.372775, 708.589835, 777.629855, 7
 all.peaks.to.align <- sort(c(c13.is.lipids, lcms.peaks$`Input Mass`))
 ```
 
-### Align each sample individually
-As each sample is aligned to the same peaks, we can align them individually to reduce memory overhead.
-```{r, eval=run.alignment}
-bp <- SnowfastParam(workers = 8L, force.GC = T)
+### Measure each sample at the reference peaks
+Each sample is measured at the same reference peaks, so we can process them one at a time to keep memory use low.
 
-# load, align, save
+`peakProcess` with `ref = all.peaks.to.align` does this measurement. These spectra differ from the arthritis data in one important way: they were already centroided, so each spectrum is a list of peaks, not a profile curve. `peakProcess` detects this and does not search for local maxima. Instead, for each reference peak, it takes the centroided peak closest to the reference m/z, as long as it lies within the tolerance, and records its intensity. If no peak lies within the tolerance, the value is zero. No signal-to-noise cutoff is applied, so low intensities are not removed.
+
+We use a tolerance of 6 ppm for every sample. If no tolerance is given, Cardinal estimates one from each sample's own peak spacing, and for these data it chooses 6 ppm for some samples and 7 ppm for others. A fixed value treats every sample the same way. We do not use the 60 ppm tolerance of the arthritis case study. In these data, neighboring centroided peaks are only about 60 ppm apart, so a 60 ppm window would almost always find some peak, often a different analyte. The two closest reference peaks are 25 ppm apart, more than twice the tolerance, so two reference peaks can never take the same peak.
+
+When `ref` is given, `peakProcess` keeps every reference peak, even rare ones; `filterFreq = FALSE` only makes this explicit. Later steps find the internal standards by their position in `all.peaks.to.align`, so the feature list must match it exactly.
+
+```{r, eval=run.alignment}
+# load, measure at the reference peaks, save
 for (sn in samp$short_name) {
     readMSIData(file.path(recalib.data.path, paste0(sn, ".imzML"))) |>
-    peakAlign(ref = all.peaks.to.align) |>
-    process(chunkopts = list(nchunks = if (hpc) 20L else 40L), BPPARAM = bp) |>
+    peakProcess(ref = all.peaks.to.align, tolerance = 6, units = "ppm",
+      filterFreq = FALSE) |>
     writeMSIDataSafe(file.path(aligned.data.path, paste0(sn, ".imzML")))
 }
 invisible(gc())
@@ -964,22 +969,21 @@ first_ggarr
 
 ## Restrict to adequately fit models
 
-In `3-Statistical-Modeling` we manually classified each feature's QQ plot, residual variance, and outliers from this plot set, and tested hypotheses only on the features that passed. That evaluation has not yet been done for the stroke dataset, so the tests below currently run on every model. The scaffold below applies the same filter once
-`Outputs/stroke-feature-model-fit-evaluation.csv` exists, with the same `fid`, `qq`, `var`, and `outliers` columns as the arthritis version.
+As in `3-Statistical-Modeling`, we manually classified each feature's QQ plot, residual variance, and outliers from this plot set, recorded in `Outputs/stroke-feature-model-fit-evaluation.csv`. We test hypotheses only on the features that passed all three.
 
 ```{r}
-# model_fit_eval <- read_csv(file.path(outputs.path,
-#                                      "stroke-feature-model-fit-evaluation.csv"),
-#                            show_col_types = FALSE) |>
-#   mutate(across(qq:outliers, as.factor))
-#
-# # guard against the evaluation drifting out of sync with the feature list
-# stopifnot(nrow(model_fit_eval) == length(mt))
-#
-# passed <- model_fit_eval |>
-#   filter(qq == "ok" & var == "ok" & outliers == "ok")
-#
-# mt <- mt[passed$fid]
+model_fit_eval <- read_csv(file.path(outputs.path,
+                                     "stroke-feature-model-fit-evaluation.csv"),
+                           show_col_types = FALSE) |>
+  mutate(across(qq:outliers, as.factor))
+
+# guard against the evaluation drifting out of sync with the feature list
+stopifnot(nrow(model_fit_eval) == length(mt))
+
+passed <- model_fit_eval |>
+  filter(qq == "ok" & var == "ok" & outliers == "ok")
+
+mt <- mt[passed$fid]
 ```
 
 
@@ -1048,7 +1052,9 @@ To express each estimate as a percent difference, we need the mean of the refere
 ref_means <- bind_rows(lapply(seq_len(length(mt)), function(k) {
   b <- fixef(mt[[k]])
   stopifnot(all(c("(Intercept)", "tissuestroke", "day28") %in% names(b)))
-  tibble(i      = k,
+  # after mt[passed$fid], i keeps each model's original feature index, so use it
+  # rather than the position k to match the contrast results joined by i
+  tibble(i      = mcols(mt)$i[k],
          ref_h1 = unname(b["(Intercept)"] + b["tissuestroke"]),
          ref_h2 = unname(b["(Intercept)"] + b["day28"]))
 }))
@@ -1113,7 +1119,9 @@ signift_stroke |>
     panel.grid.minor = element_blank(),
     strip.background = element_rect(fill = "white", color = "black"),
     strip.text       = element_text(face = "bold"),
-    legend.position  = "bottom"
+    legend.position  = "bottom",
+    panel.spacing.x  = unit(1.5, "lines"),  # keeps edge tick labels of adjacent panels apart
+    plot.margin      = margin(5.5, 14, 5.5, 5.5)  # room for the rightmost tick label
   )
 
 ggsave(file.path("Recreated-Figures", "Figure-Stroke-Volcano.png"),

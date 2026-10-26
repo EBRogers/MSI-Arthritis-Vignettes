@@ -85,7 +85,7 @@ if (length(indices_of_ROI_segmentation_ions) >= 1) {
 
 # Non-specific filtering
 
-We will be filtering by mean and standard deviation. We assume that noisy, non-informative features have low variation and low intensity. For simplicity, we will drop features where sample-wide mean intensity or standard deviation is in the bottom 25th percentile in non-background pixels.
+We will be filtering by mean and standard deviation. We assume that noisy, non-informative features have low variation and low intensity. For simplicity, we will drop features where sample-wide mean intensity or standard deviation is in the bottom 35th percentile in non-background pixels.
 
 Now we can compute the mean and standard deviation of each feature across all samples.
 
@@ -103,8 +103,8 @@ Now we can identify features to drop.
 
 ```{r}
 mz_to_keep <- mz(subsetFeatures(mse,
-                              !(sd < quantile(sd, p = 0.25) | 
-                                mean < quantile(mean, p = 0.25))))
+                              !(sd < quantile(sd, p = 0.35) | 
+                                mean < quantile(mean, p = 0.35))))
  
 ```
 
@@ -112,7 +112,7 @@ Let's visualize the filter.
 
 ```{r ns_filt_visualize}
 as_tibble(fData(mse)) |>
-  mutate(keep = !(mean < quantile(mean, p = 0.25) | sd < quantile(sd, p = 0.25))) |>
+  mutate(keep = !(mean < quantile(mean, p = 0.35) | sd < quantile(sd, p = 0.35))) |>
   ggplot(aes(x = mean, y = sd, color = keep)) +
   geom_point(alpha = 0.4)
 ```
