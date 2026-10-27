@@ -890,15 +890,15 @@ features with m/z values nearest our approximate values for the
 representative features.</p>
 <pre class="r"><code>m &lt;- readMSIData(file.path(DATA_PATH, MSE_FILENAMES[1]), verbose=F)
 
-cartilage_feature_approx &lt;- 1141.585
+cartilage_feature_approx &lt;- 1141.582
 cartilage_feature_ids &lt;- features(m, mz = cartilage_feature_approx)
 
-background_feature_approx &lt;- c(1570.6763, 
-                                1571.6790, 
-                                1572.6831, 
-                                1592.6613, 
-                                1593.6630, 
-                                1594.6662, 
+background_feature_approx &lt;- c(1570.676, 
+                                1571.679, 
+                                1572.681, 
+                                1592.667, 
+                                1593.672, 
+                                1594.679, 
                                 1608.631)
 background_feature_ids &lt;- features(m, mz = background_feature_approx)
 
@@ -1067,16 +1067,16 @@ mse_list_segmented &lt;- BiocParallel::bplapply(
         y
       })
 
-    cartilage_feature_approx &lt;- 1141.585
+    cartilage_feature_approx &lt;- 1141.582
     cartilage_feature_ids &lt;- features(mse, 
       mz = cartilage_feature_approx)
 
-    background_feature_approx &lt;- c(1570.6763, 
-                                  1571.6790, 
-                                  1572.6831, 
-                                  1592.6613, 
-                                  1593.6630, 
-                                  1594.6662, 
+    background_feature_approx &lt;- c(1570.676, 
+                                  1571.679, 
+                                  1572.681, 
+                                  1592.667, 
+                                  1593.672, 
+                                  1594.679, 
                                   1608.631)
     background_feature_ids &lt;- features(mse, 
       mz = background_feature_approx)
@@ -1271,12 +1271,12 @@ greater than endogenous analytes - will bias normalization and should be
 dropped. We will remove the mass calibrant along with its isotopes and
 adducts, as their very high intensity would otherwise dominate the total
 ion current.</p>
-<pre class="r"><code>bg_mz_approx &lt;- c(1570.6763, 
-                  1571.6790, 
-                  1572.6831, 
-                  1592.6613, 
-                  1593.6630, 
-                  1594.6662, 
+<pre class="r"><code>bg_mz_approx &lt;- c(1570.676, 
+                  1571.679, 
+                  1572.681, 
+                  1592.667, 
+                  1593.672, 
+                  1594.679, 
                   1608.631)
 
 bg_idx &lt;- features(m, mz=bg_mz_approx)</code></pre>

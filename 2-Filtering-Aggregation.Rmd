@@ -60,27 +60,23 @@ mse <- readMSIData(COMBINED_DATA_PATH, verbose = F)
 Some features used for segmentation remain. Conducting analysis on these features is double dipping, as they have been used to create the ROIs. You can explore this concept in greater detail in `Simulation-2`. `features` will throw warnings if it can't find a close enough m/z value. Assuming that feature was already dropped, that is OK. (Warnings are muted for this chunk.)
 
 ```{r drop_segmentation_mz, warning=FALSE}
-rounded_mz_of_ROI_segmentation_ions <- c(1141.585, 
-                                1142.5732, 
-                                1570.6763, 
-                                1571.6790, 
-                                1572.6831, 
-                                1592.6613, 
-                                1593.6630, 
-                                1594.6662, 
+rounded_mz_of_ROI_segmentation_ions <- c(1141.582, 
+                                1142.575, 
+                                1570.676, 
+                                1571.679, 
+                                1572.681, 
+                                1592.667, 
+                                1593.672, 
+                                1594.679, 
                                 1608.631)
 
 indices_of_ROI_segmentation_ions <- features(mse, 
-                            mz = rounded_mz_of_ROI_segmentation_ions, 
-                            tolerance = .001, 
-                            units = "mz")
+                            mz = rounded_mz_of_ROI_segmentation_ions)
 
 # If following the vignettes exactly the above step should yield two indicies
+stopifnot(length(indices_of_ROI_segmentation_ions) == 2)
 
-if (length(indices_of_ROI_segmentation_ions) >= 1) {
-  # work around as mse[-indicies_to_drop] not supported
-  mse <- mse[setdiff(1:nrow(mse), indices_of_ROI_segmentation_ions), ]
-}
+mse <- mse[setdiff(1:nrow(mse), indices_of_ROI_segmentation_ions), ]
 ```
 
 # Non-specific filtering
@@ -278,7 +274,7 @@ n_deiso <- length(mz(mse_deiso))
 n_cart  <- length(mz(mse_cart_filtered))
 
 # ROI-selection ions still present in the normalized image that are dropped in this vignette
-n_roi_dropped <- sum(round(mz(mse_pre_filt), 3) %in% round(rounded_mz_of_ROI_segmentation_ions, 3))
+n_roi_dropped <- length(indices_of_ROI_segmentation_ions)
 n_pre_ns <- n_norm - n_roi_dropped  # after dropping ROI ions, before NS filtering
 
 cat("After Peak Picking ", n_pp, "\n")
@@ -295,9 +291,9 @@ cat("After cartilage sparsity filtering [-", n_deiso - n_cart, "] ", n_cart, "\n
 ```{r, warning=FALSE, message=FALSE}
 cat("Table S3\n")
 cat("Approximate m/z of preselected features used to segment cartilage (and isotopes/spatial analogs): ", 
-  paste(round(c(1141.585, 1142.5732),3), collapse = ", "), "\n")
+  paste(round(c(1141.582, 1142.575),3), collapse = ", "), "\n")
 cat("Approximate m/z of preselected features used to segment background (and isotopes/spatial analogs): ", 
-  paste(round(c(1570.6763, 1571.6790, 1572.6831, 1592.6613, 1593.6630, 1594.6662, 1608.631),3), collapse = ", "), "\n")
+  paste(round(c(1570.676, 1571.679, 1572.681, 1592.667, 1593.672, 1594.679, 1608.631),3), collapse = ", "), "\n")
 cat("Approximate m/z of features removed by non-specific filtering: ",
   paste(setdiff(round(setdiff(mz(mse_pre_filt), mz(mse_ns_filt)),3), round(rounded_mz_of_ROI_segmentation_ions, 3)), collapse = ", "), "\n")
 
@@ -349,12 +345,17 @@ style = "dark", bg="black", key = F, grid = F, pointsize = 36, superpose = F, fi
       xlab = NA)
 
 
-id_1 <- iso_merged |> filter(group_id %in% c(jl_3[25])) |> pull(feature_id)
-id_2 <- iso_merged |> filter(group_id %in% c(jl_3[28])) |> pull(feature_id)
-id_3 <- iso_merged |> filter(group_id %in% c(jl_3[34])) |> pull(feature_id)
+# groups are picked by monoisotopic m/z
+id_1 <- iso_merged |> filter(group_id %in% jl_3, round(monoisotopic_mz, 3) == 1781.899) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id %in% jl_3, round(monoisotopic_mz, 3) == 1923.868) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id %in% jl_3, round(monoisotopic_mz, 3) == 2501.243) |> pull(feature_id)
+stopifnot(lengths(list(id_1, id_2, id_3)) == 3)
+
+fig_i <- c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3])
+names(fig_i) <- sprintf("m/z = %.3f", mz(m)[fig_i])
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-3-isotope-sii.png"), width = 1500, height = 900, pointsize = 54)
-image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2],id_1[3], id_2[3], id_3[3]), 
+image(m, i = fig_i,
       scale = T, 
       superpose = F, 
       layout = c(3,3), 
@@ -380,12 +381,17 @@ jl <- sort(unique(iso_merged |> group_by(group_id) |> mutate(n = n()) |> ungroup
 #      ylab = NA,
 #      xlab = NA)
 
-id_1 <- iso_merged |> filter(group_id == jl[18]) |> pull(feature_id)
-id_2 <- iso_merged |> filter(group_id == jl[21]) |> pull(feature_id)
-id_3 <- iso_merged |> filter(group_id == jl[36]) |> pull(feature_id)
+# groups are picked by monoisotopic m/z
+id_1 <- iso_merged |> filter(group_id %in% jl, round(monoisotopic_mz, 3) == 1128.517) |> pull(feature_id)
+id_2 <- iso_merged |> filter(group_id %in% jl, round(monoisotopic_mz, 3) == 2135.954) |> pull(feature_id)
+id_3 <- iso_merged |> filter(group_id %in% jl, round(monoisotopic_mz, 3) == 2231.128) |> pull(feature_id)
+stopifnot(lengths(list(id_1, id_2, id_3)) == 2)
+
+fig_i <- c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2])
+names(fig_i) <- sprintf("m/z = %.3f", mz(m)[fig_i])
 
 png(filename = file.path("Recreated-Figures","Figure-clusters-2-isotope-sii.png"), width = 1500, height = 700, pointsize = 54)
-image(m, i = c(id_1[1], id_2[1], id_3[1], id_1[2], id_2[2], id_3[2]), 
+image(m, i = fig_i,
       scale = T, 
       superpose = F, 
       layout = c(2,3), 
