@@ -506,7 +506,7 @@ ggarr <- ggarrange(ggarrange(qqs,
          annotate_figure(bottom = paste0("Feature: ", round(unique(tmp_df$mz)[1], 3), " m/z" ))
 ggsave(file.path("QQ-Itx-SII-Plots",paste0("QQ-", f ,".png")), plot = ggarr, height = 9, width = 11, units = "in")
 
-if (round(unique(tmp_df$mz)[1], 2) == 1968.86) {
+if (round(unique(tmp_df$mz)[1], 3) == 2044.889) {
   ggsave(file.path("Recreated-Figures","Figure-Statistical-Modeling-Good-Fit.png"), plot = ggarr, height = 9, width = 11, units = "in")
 }
 }
