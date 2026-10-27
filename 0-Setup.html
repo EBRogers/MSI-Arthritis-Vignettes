@@ -461,17 +461,32 @@ zip archives and expanded on download. This requires <code>curl</code>
 and either <code>unzip</code> or <code>tar</code>, all of which ship
 with current macOS, Windows, and Linux.</p>
 <pre class="r"><code>download &lt;- FALSE</code></pre>
+<div id="create-data-directories" class="section level3">
+<h3>Create data directories</h3>
+<p><code>Data/</code> holds the arthritis data for vignettes 1–5 and
+<code>Mouse-Stroke-Data/</code> the stroke data for vignette 6. Create
+the structure for both up front; the sections below download into
+it.</p>
+<pre class="r"><code>data_dirs &lt;- c(
+  &quot;Data/Raw&quot;, &quot;Data/Preprocessing&quot;, &quot;Data/Filtering-Aggregation&quot;, &quot;Data/Simulation-Data&quot;,
+  &quot;Mouse-Stroke-Data/Raw&quot;, &quot;Mouse-Stroke-Data/Preprocessing-Filtering&quot;
+)
+for (d in data_dirs) dir.create(d, showWarnings = FALSE, recursive = TRUE)</code></pre>
+</div>
+<div id="download-helpers" class="section level3">
+<h3>Download helpers</h3>
 <p><code>fetch</code> downloads a single file, choosing FTPS or HTTPS
 from the URL, skipping files already present, and retrying transient
-failures. <code>login</code> is passed to the MassIVE FTP server;
-<code>anonymous:anonymous</code> works for the public dataset, and can
-be set to a MassIVE <code>username:password</code> for a private one.
-<code>expand</code> unpacks a zip archive with whichever of
-<code>unzip</code> or <code>tar</code> is available, since R’s internal
-unzip cannot read entries larger than 4 GB.</p>
+failures. <code>fetch_par</code> downloads many files from MassIVE at
+once via <code>curl --parallel</code>, which is much faster than
+fetching them one at a time. <code>login</code> is passed to the MassIVE
+FTP server; <code>anonymous:anonymous</code> works for the public
+dataset, and can be set to the dataset’s submission/reviewer credentials
+for a private one. <code>expand</code> unpacks a zip archive with
+whichever of <code>unzip</code> or <code>tar</code> is available, since
+R’s internal unzip cannot read entries larger than 4 GB.</p>
 <pre class="r"><code>fetch &lt;- function(url, dest, login = &quot;anonymous:anonymous&quot;, tries = 5) {
   if (file.exists(dest)) return(invisible())
-  dir.create(dirname(dest), showWarnings = FALSE, recursive = TRUE)
   part &lt;- paste0(dest, &quot;.part&quot;)
   for (i in seq_len(tries)) {
     ok &lt;- tryCatch({
@@ -492,6 +507,16 @@ unzip cannot read entries larger than 4 GB.</p>
   file.rename(part, dest)
 }
 
+fetch_par &lt;- function(urls, dests, login = &quot;anonymous:anonymous&quot;, max = 4, tries = 5) {
+  keep &lt;- !file.exists(dests)
+  urls &lt;- urls[keep]; dests &lt;- dests[keep]
+  if (!length(urls)) return(invisible())
+  args &lt;- c(&quot;--ssl-reqd&quot;, &quot;--user&quot;, login, &quot;--parallel&quot;, &quot;--parallel-max&quot;, max,
+            &quot;--retry&quot;, tries, &quot;--fail&quot;, &quot;--silent&quot;, &quot;--show-error&quot;, &quot;--remove-on-error&quot;,
+            c(rbind(&quot;-o&quot;, dests, urls)))
+  if (system2(&quot;curl&quot;, args) != 0) stop(&quot;one or more downloads failed; rerun to resume&quot;)
+}
+
 expand &lt;- function(zip, exdir = &quot;.&quot;) {
   if (nzchar(Sys.which(&quot;unzip&quot;))) {
     unzip(zip, exdir = exdir, unzip = &quot;unzip&quot;)
@@ -501,6 +526,7 @@ expand &lt;- function(zip, exdir = &quot;.&quot;) {
     stop(&quot;Need &#39;unzip&#39; or &#39;tar&#39; to expand &quot;, zip)
   }
 }</code></pre>
+</div>
 <div id="arthritis-data-and-simulations-vignettes-15-and-simulation-1-2" class="section level3">
 <h3>Arthritis data and Simulations (Vignettes 1–5 and Simulation
 1-2)</h3>
@@ -508,9 +534,14 @@ expand &lt;- function(zip, exdir = &quot;.&quot;) {
 <code>Raw</code> and <code>Simulation-Data</code> are plain files; the
 others are zip archives that expand into <code>Data/Preprocessing</code>
 or <code>Data/Filtering-Aggregation</code>. Set an entry to
-<code>TRUE</code> to download it.</p>
+<code>TRUE</code> to download it. The public dataset is downloaded
+anonymously — no account needed — and files are fetched in parallel,
+which is much faster than one at a time; anonymous access allows about
+<code>parallel_max = 4</code> simultaneous connections before the server
+refuses more. Still, this will take while.</p>
 <pre class="r"><code>arthritis_url &lt;- &quot;ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-08-03_ebrogers_8d22a971&quot;
-massive_login &lt;- &quot;anonymous:anonymous&quot;
+massive_login &lt;- Sys.getenv(&quot;MASSIVE_LOGIN&quot;, &quot;anonymous:anonymous&quot;)
+parallel_max  &lt;- 4 # generally the max allowable by MassIVE
 
 arthritis &lt;- c(
   &quot;Raw&quot;                                                    = TRUE,
@@ -529,23 +560,27 @@ arthritis &lt;- c(
                &quot;6938a_med_cad&quot;, &quot;6938b_lat_cad&quot;, &quot;6944a_med_cad&quot;, &quot;6944b_lat_cad&quot;,
                &quot;6949a_lat_oa&quot;, &quot;6949a_med_oa&quot;, &quot;6954a_lat_oa&quot;, &quot;6954b_med_oa&quot;)
 
+  urls &lt;- character(0); dests &lt;- character(0)
+
   if (isTRUE(arthritis[&quot;Raw&quot;])) {
-    for (f in paste0(rep(samples, each = 2), c(&quot;.ibd&quot;, &quot;.imzML&quot;))) {
-      fetch(paste0(arthritis_url, &quot;/raw/&quot;, f), file.path(&quot;Data&quot;, &quot;Raw&quot;, f), massive_login)
-    }
+    raw &lt;- paste0(rep(samples, each = 2), c(&quot;.ibd&quot;, &quot;.imzML&quot;))
+    urls  &lt;- c(urls, paste0(arthritis_url, &quot;/raw/&quot;, raw))
+    dests &lt;- c(dests, file.path(&quot;Data&quot;, &quot;Raw&quot;, raw))
   }
 
   if (isTRUE(arthritis[&quot;Simulation-Data&quot;])) {
-    fetch(paste0(arthritis_url, &quot;/metadata/sim_list_original.RData&quot;),
-          file.path(&quot;Data&quot;, &quot;Simulation-Data&quot;, &quot;sim_list_original.RData&quot;), massive_login)
+    urls  &lt;- c(urls, paste0(arthritis_url, &quot;/metadata/sim_list_original.RData&quot;))
+    dests &lt;- c(dests, file.path(&quot;Data&quot;, &quot;Simulation-Data&quot;, &quot;sim_list_original.RData&quot;))
   }
 
-  for (z in setdiff(names(which(arthritis)), c(&quot;Raw&quot;, &quot;Simulation-Data&quot;))) {
-    tmp &lt;- file.path(tempdir(), paste0(z, &quot;.zip&quot;))
-    fetch(paste0(arthritis_url, &quot;/raw/&quot;, z, &quot;.zip&quot;), tmp, massive_login)
-    expand(tmp)
-    unlink(tmp)
-  }
+  zips &lt;- setdiff(names(which(arthritis)), c(&quot;Raw&quot;, &quot;Simulation-Data&quot;))
+  ztmp &lt;- file.path(tempdir(), paste0(zips, &quot;.zip&quot;))
+  urls  &lt;- c(urls, paste0(arthritis_url, &quot;/raw/&quot;, zips, &quot;.zip&quot;))
+  dests &lt;- c(dests, ztmp)
+
+  fetch_par(urls, dests, massive_login, parallel_max)
+
+  for (t in ztmp) { expand(t); unlink(t) }
 }</code></pre>
 </div>
 <div id="mouse-stroke-data-vignette-6" class="section level3">
