@@ -6,6 +6,8 @@ This repository contains a set of analysis vignettes accompanying *Statistical P
 
 The links below contain reproducible code, in [R](https://cran.r-project.org), and outputs for each step of the proposed workflow. Datasets can be obtained via [0-Setup](https://vitek-lab.github.io/Workflow-CaseStudies-Statistical-Analysis-Differential-Abundance-MSI/0-Setup.html).
 
+The arthritis data for vignettes 1–5 and the simulations are a reanalysis, [RMSV000000712](https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=465f2ad3c47744b38f6571bec338d3b6), of MassIVE dataset [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/dataset.jsp?accession=MSV000094448). The mouse stroke data for vignette 6 are MassIVE dataset [MSV000103709](https://massive.ucsd.edu/ProteoSAFe/dataset.jsp?accession=MSV000103709), with the intermediates in reanalysis [RMSV000000719](https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=1af9e2494dc44186a45fed03656215f5).
+
 - [0-Setup](https://vitek-lab.github.io/Workflow-CaseStudies-Statistical-Analysis-Differential-Abundance-MSI/0-Setup.html)
 - [1-Preprocessing](https://vitek-lab.github.io/Workflow-CaseStudies-Statistical-Analysis-Differential-Abundance-MSI/1-Preprocessing.html)
 - [2-Filtering-Aggregation](https://vitek-lab.github.io/Workflow-CaseStudies-Statistical-Analysis-Differential-Abundance-MSI/2-Filtering-Aggregation.html)
