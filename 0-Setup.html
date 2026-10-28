@@ -449,9 +449,10 @@ renv::install(packages)</code></pre>
 <h2>Download data</h2>
 <p>The data are hosted in two places. The arthritis data for vignettes
 1–5 is a reanalysis of MassIVE dataset <a href="https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb">MSV000094448</a>,
-accession <a href="https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=8d22a971a81c4655a50aacd262a6960e">RMSV000000712</a>.
-The mouse stroke data for vignette 6 is hosted in a public Amazon S3
-bucket. Both are downloaded directly, with no account or
+accession <a href="https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=465f2ad3c47744b38f6571bec338d3b6">RMSV000000712</a>.
+The mouse stroke data for vignette 6 is MassIVE dataset <a href="https://massive.ucsd.edu/ProteoSAFe/dataset.jsp?accession=MSV000103709">MSV000103709</a>,
+with the intermediates in reanalysis <a href="https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=1af9e2494dc44186a45fed03656215f5">RMSV000000719</a>.
+Both are downloaded directly, with no account or
 credentials.</p>
 <p>Downloading is off by default, so knitting this document transfers
 nothing. To fetch data, set <code>download</code> to <code>TRUE</code>
@@ -539,7 +540,7 @@ anonymously — no account needed — and files are fetched in parallel,
 which is much faster than one at a time; anonymous access allows about
 <code>parallel_max = 4</code> simultaneous connections before the server
 refuses more. Still, this will take while.</p>
-<pre class="r"><code>arthritis_url &lt;- &quot;ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-08-03_ebrogers_8d22a971&quot;
+<pre class="r"><code>arthritis_url &lt;- &quot;ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-10-27_ebrogers_465f2ad3&quot;
 massive_login &lt;- Sys.getenv(&quot;MASSIVE_LOGIN&quot;, &quot;anonymous:anonymous&quot;)
 parallel_max  &lt;- 4 # generally the max allowable by MassIVE
 
@@ -588,11 +589,11 @@ arthritis &lt;- c(
 <p>Converted raw spectra and intermediates for the stroke case study,
 all zip archives that expand into <code>Mouse-Stroke-Data</code>. Set an
 entry to <code>TRUE</code> to download it.</p>
-<pre class="r"><code>stroke_url &lt;- &quot;public URL available soon&quot;
+<pre class="r"><code>stroke_url     &lt;- &quot;ftp://massive-ftp.ucsd.edu/x01/RMSV000000719/2026-10-28_ebrogers_1af9e249/raw&quot;
+stroke_raw_url &lt;- &quot;ftp://massive-ftp.ucsd.edu/v15/MSV000103709/raw&quot;
 
 stroke &lt;- c(
-  &quot;Raw_imzML&quot;              = TRUE,
-  &quot;Recalibrated&quot;           = FALSE,
+  &quot;Mouse-Stroke-Raw_imzML&quot; = TRUE,
   &quot;Aligned&quot;                = FALSE,
   &quot;Analytes-Aligned&quot;       = FALSE,
   &quot;IS-Aligned&quot;             = FALSE,
@@ -605,7 +606,8 @@ stroke &lt;- c(
 <pre class="r"><code>if (download) {
   for (z in names(which(stroke))) {
     tmp &lt;- file.path(tempdir(), paste0(z, &quot;.zip&quot;))
-    fetch(paste0(stroke_url, &quot;/&quot;, z, &quot;.zip&quot;), tmp)
+    url &lt;- if (z == &quot;Mouse-Stroke-Raw_imzML&quot;) stroke_raw_url else stroke_url
+    fetch(paste0(url, &quot;/&quot;, z, &quot;.zip&quot;), tmp)
     expand(tmp)
     unlink(tmp)
   }

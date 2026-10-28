@@ -89,7 +89,7 @@ renv::install(packages)
 
 ## Download data
 
-The data are hosted in two places. The arthritis data for vignettes 1–5 is a reanalysis of MassIVE dataset [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb), accession [RMSV000000712](https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=8d22a971a81c4655a50aacd262a6960e). The mouse stroke data for vignette 6 is hosted in a public Amazon S3 bucket. Both are downloaded directly, with no account or credentials.
+The data are hosted in two places. The arthritis data for vignettes 1–5 is a reanalysis of MassIVE dataset [MSV000094448](https://massive.ucsd.edu/ProteoSAFe/private-dataset.jsp?task=c8ee2b4247994c4396007e1cffd0bcfb), accession [RMSV000000712](https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=465f2ad3c47744b38f6571bec338d3b6). The mouse stroke data for vignette 6 is MassIVE dataset [MSV000103709](https://massive.ucsd.edu/ProteoSAFe/dataset.jsp?accession=MSV000103709), with the intermediates in reanalysis [RMSV000000719](https://massive.ucsd.edu/ProteoSAFe/dataset_files.jsp?task=1af9e2494dc44186a45fed03656215f5). Both are downloaded directly, with no account or credentials.
 
 Downloading is off by default, so knitting this document transfers nothing. To fetch data, set `download` to `TRUE` and, in each section below, set the items you want; the raw spectra of each dataset are selected by default. Intermediates are distributed as zip archives and expanded on download. This requires `curl` and either `unzip` or `tar`, all of which ship with current macOS, Windows, and Linux.
 
@@ -162,7 +162,7 @@ expand <- function(zip, exdir = ".") {
 Converted raw spectra and the intermediate result of each step. `Raw` and `Simulation-Data` are plain files; the others are zip archives that expand into `Data/Preprocessing` or `Data/Filtering-Aggregation`. Set an entry to `TRUE` to download it. The public dataset is downloaded anonymously — no account needed — and files are fetched in parallel, which is much faster than one at a time; anonymous access allows about `parallel_max = 4` simultaneous connections before the server refuses more. Still, this will take while.
 
 ```{r}
-arthritis_url <- "ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-08-03_ebrogers_8d22a971"
+arthritis_url <- "ftp://massive-ftp.ucsd.edu/x01/RMSV000000712/2026-10-27_ebrogers_465f2ad3"
 massive_login <- Sys.getenv("MASSIVE_LOGIN", "anonymous:anonymous")
 parallel_max  <- 4 # generally the max allowable by MassIVE
 
@@ -214,12 +214,12 @@ if (download) {
 
 Converted raw spectra and intermediates for the stroke case study, all zip archives that expand into `Mouse-Stroke-Data`. Set an entry to `TRUE` to download it.
 
-```{r, eval = F}
-stroke_url <- "public URL available soon"
+```{r}
+stroke_url     <- "ftp://massive-ftp.ucsd.edu/x01/RMSV000000719/2026-10-28_ebrogers_1af9e249/raw"
+stroke_raw_url <- "ftp://massive-ftp.ucsd.edu/v15/MSV000103709/raw"
 
 stroke <- c(
-  "Raw_imzML"              = TRUE,
-  "Recalibrated"           = FALSE,
+  "Mouse-Stroke-Raw_imzML" = TRUE,
   "Aligned"                = FALSE,
   "Analytes-Aligned"       = FALSE,
   "IS-Aligned"             = FALSE,
@@ -235,7 +235,8 @@ stroke <- c(
 if (download) {
   for (z in names(which(stroke))) {
     tmp <- file.path(tempdir(), paste0(z, ".zip"))
-    fetch(paste0(stroke_url, "/", z, ".zip"), tmp)
+    url <- if (z == "Mouse-Stroke-Raw_imzML") stroke_raw_url else stroke_url
+    fetch(paste0(url, "/", z, ".zip"), tmp)
     expand(tmp)
     unlink(tmp)
   }
