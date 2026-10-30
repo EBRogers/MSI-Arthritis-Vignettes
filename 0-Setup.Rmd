@@ -111,7 +111,7 @@ for (d in data_dirs) dir.create(d, showWarnings = FALSE, recursive = TRUE)
 
 ### Download helpers
 
-`fetch` downloads a single file, choosing FTPS or HTTPS from the URL, skipping files already present, and retrying transient failures. `fetch_par` downloads many files from MassIVE at once via `curl --parallel`, which is much faster than fetching them one at a time. `login` is passed to the MassIVE FTP server; `anonymous:anonymous` works for the public dataset, and can be set to the dataset's submission/reviewer credentials for a private one. `expand` unpacks a zip archive with whichever of `unzip` or `tar` is available, since R's internal unzip cannot read entries larger than 4 GB.
+`fetch` downloads a single file, choosing FTPS or HTTPS from the URL, skipping files already present, and retrying transient failures. `fetch_par` downloads many files from MassIVE at once via `curl --parallel`, which is much faster than fetching them one at a time. `login` is passed to the MassIVE FTP server; both datasets are public, so the default `anonymous:anonymous` works. `expand` unpacks a zip archive with whichever of `unzip` or `tar` is available, since R's internal unzip cannot read entries larger than 4 GB.
 
 ```{r}
 fetch <- function(url, dest, login = "anonymous:anonymous", tries = 5) {

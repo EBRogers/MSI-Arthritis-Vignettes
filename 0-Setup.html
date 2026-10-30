@@ -481,9 +481,8 @@ from the URL, skipping files already present, and retrying transient
 failures. <code>fetch_par</code> downloads many files from MassIVE at
 once via <code>curl --parallel</code>, which is much faster than
 fetching them one at a time. <code>login</code> is passed to the MassIVE
-FTP server; <code>anonymous:anonymous</code> works for the public
-dataset, and can be set to the dataset’s submission/reviewer credentials
-for a private one. <code>expand</code> unpacks a zip archive with
+FTP server; both datasets are public, so the default
+<code>anonymous:anonymous</code> works. <code>expand</code> unpacks a zip archive with
 whichever of <code>unzip</code> or <code>tar</code> is available, since
 R’s internal unzip cannot read entries larger than 4 GB.</p>
 <pre class="r"><code>fetch &lt;- function(url, dest, login = &quot;anonymous:anonymous&quot;, tries = 5) {
